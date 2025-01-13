@@ -1,0 +1,3 @@
+"""
+Perceptr FastAPI Application
+""" 
