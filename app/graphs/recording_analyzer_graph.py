@@ -70,16 +70,23 @@ class RecordingAnalyzerGraph():
                     6. Errors and issues
                     
         Then at the end, provide a summary of the user's behavior, emotional state, and recommendations for improvement.
+        
                     """
-       # Instead of using LangChain's ChatGoogleGenerativeAI, use genai directly
-        model = genai.GenerativeModel(model_name="gemini-2.0-flash-exp")
-        response = model.generate_content(
-        [uploaded_recording, prompt],
-        request_options={"timeout": 600}
-        )
-    
+
+        messages = [
+            HumanMessage(content=[{
+            "type": "media",
+            "mime_type": uploaded_recording.mime_type,
+            "file_uri": uploaded_recording.uri
+        },]),
+            HumanMessage(content=prompt)
+        ]
+
+        response = self.gemini_llm.invoke(messages).content
+        logger.info(f"Response: {response}")
+
         return {
-        "recording_analysis": response.text
+            "recording_analysis": response
         }
 
 
