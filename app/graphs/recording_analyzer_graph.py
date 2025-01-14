@@ -18,10 +18,37 @@ os.environ["LANGFUSE_SECRET_KEY"] = settings.LANGFUSE_PRIVATE_KEY
 os.environ["LANGFUSE_HOST"] = settings.LANGFUSE_HOST
 
 import google.generativeai as genai
+from pydantic import BaseModel, Field
+from typing import Optional, List
+
+
+# class TimestampDescription(BaseModel):
+#     """A timestamp in the recording."""
+#     timestamp: str = Field(description="The timestamp in the recording.")
+#     description: str = Field(description="A detailed description of the user's actions")
+#     bugs: Optional[str] = Field(description="Any bugs or issues found in the recording.")
+#     errors: Optional[str] = Field(description="Any errors found in the recording.")
+#     recommendations: Optional[str] = Field(description="Any recommendations for improvement.")
+
+# class RecordingAnalysis(BaseModel):
+#     """The analysis of the recording."""
+#     timestamp_descriptions: List[TimestampDescription] = Field(description="A list of timestamp descriptions.")
+#     summary: str = Field(description="A summary of the user's behavior, emotional state, and recommendations for improvement.")
+
+
+class RecordingAnalysis(BaseModel):
+    """Analysis of a user session recording."""
+    timestamps: List[str] = Field(description="The timestamps in the recording.")
+    descriptions: List[str] = Field(description="For each timestamp, a detailed description of the user's actions. Add the timestamp to the description.")
+    bugs: Optional[str] = Field(description="Any bugs or issues found in the recording. Add the timestamp to the bug description.")
+    errors: Optional[str] = Field(description="Any errors found in the recording. Add the timestamp to the error description.")
+    recommendations: Optional[str] = Field(description="Any recommendations for improvement. Add the timestamp to the recommendation description.")
+    summary: str = Field(description="A summary of the user's behavior, emotional state, and recommendations for improvement.")
+
 
 class State(TypedDict):
     recording_path: str
-    recording_analysis: str
+    recording_analysis: RecordingAnalysis
 
 
 class RecordingAnalyzerGraph():
@@ -82,8 +109,9 @@ class RecordingAnalyzerGraph():
             HumanMessage(content=prompt)
         ]
 
-        response = self.gemini_llm.invoke(messages).content
+        response = self.gemini_llm.with_structured_output(RecordingAnalysis).invoke(messages)
         logger.info(f"Response: {response}")
+        
 
         return {
             "recording_analysis": response
