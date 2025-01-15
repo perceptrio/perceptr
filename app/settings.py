@@ -14,8 +14,10 @@ class Settings(BaseSettings):
     
     # JWT settings
     SECRET_KEY: str = "your-secret-key-here"  # Change this in production!
+    REFRESH_SECRET_KEY: str = "your-refresh-secret-key-here"  # Change this in production!
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 365 * 24  # a year
 
     class Config:
         env_file = ".env"

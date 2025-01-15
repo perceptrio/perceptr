@@ -10,7 +10,7 @@ app_dir = os.path.dirname(current_dir)
 sys.path.append(app_dir)
 
 # Import all models to ensure they are known to SQLAlchemy
-from models import Base, User
+from models import Base, Org
 from settings import settings
 
 # this is the Alembic Config object
