@@ -3,6 +3,6 @@ Database models
 """ 
 
 from .base import Base
-from .user import User
+from .org import Org
 
-__all__ = ['Base', 'User'] 
+__all__ = ['Base', 'Org'] 
