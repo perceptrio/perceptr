@@ -2,8 +2,16 @@ from typing import Literal
 from pydantic import BaseModel
 
 
+class AbstractOrg(BaseModel):
+    id: int
+    name: str
+    email: str
+
 class TokenPayload(BaseModel):
-    org_id: str
+    org: AbstractOrg
+
+class CreateTokenPayload(BaseModel):
+    org_id: int
 
 class AdminTokenPayload(TokenPayload):
     admin_id: str
