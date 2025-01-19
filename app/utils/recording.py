@@ -72,6 +72,16 @@ def preprocess_recording(recording_path: str, frames_per_second: int = 1) -> Lis
     
     return intervals
 
+def timestamp_frames(frames: List[np.ndarray], start_time: int, frames_per_second: int) -> List[Tuple[str, np.ndarray]]:
+    timestamped_frames = []
+    for i, frame in enumerate(frames):
+        frame_time = start_time + (i / frames_per_second)
+        hours, remainder = divmod(frame_time, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        timestamp = f"{int(hours):02}:{int(minutes):02}:{int(seconds):02}"
+        timestamped_frames.append((timestamp, frame))
+    return timestamped_frames
+
 def create_video_from_frames(frames: List[np.ndarray], output_path: str, fps: int = 1) -> str:
     """
     Creates a video file from a list of frames.
@@ -213,6 +223,9 @@ def analyze_frame_changes(frames: List[np.ndarray]) -> List[Tuple[int, float, np
 # if __name__ == "__main__":
 #     intervals = preprocess_recording("recordings/test2.mov", 2)
 #     start_time, frames = intervals[1]
+#     timestamped_frames = timestamp_frames(frames, start_time, 2)
+#     for timestamp, frame in timestamped_frames:
+#         print(timestamp)
     
 #     # Resize frames to standard width
 #     resized_frames = [resize_frame(frame, width=1280) for frame in frames]
