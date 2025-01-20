@@ -3,7 +3,7 @@ import numpy as np
 from typing import List, Tuple
 import os
 
-def preprocess_recording(recording_path: str, frames_per_second: int = 1) -> List[Tuple[int, List[np.ndarray]]]:
+def preprocess_recording(recording_path: str, frames_per_second: int = 1) -> List[Tuple[int, List[Tuple[float, np.ndarray]]]]:
     """
     Preprocesses a video recording by splitting it into 30-second intervals and extracting
     frames at specified rate for each interval.
@@ -13,9 +13,9 @@ def preprocess_recording(recording_path: str, frames_per_second: int = 1) -> Lis
         frames_per_second (int): Number of frames to extract per second (default: 1)
         
     Returns:
-        List[Tuple[int, List[np.ndarray]]]: List of tuples containing:
+        List[Tuple[int, List[Tuple[float, np.ndarray]]]]: List of tuples containing:
             - Start time of the interval in seconds
-            - List of frames (as numpy arrays) for that 30-second interval
+            - List of tuples with exact frame time and frame data for that interval
     """
     if not os.path.exists(recording_path):
         raise FileNotFoundError(f"Recording file not found: {recording_path}")
@@ -45,12 +45,15 @@ def preprocess_recording(recording_path: str, frames_per_second: int = 1) -> Lis
     for interval_start in range(0, int(duration), interval_duration):
         interval_frames = []
         
-        # Extract multiple frames per second
+        # Get the actual frame position at the start of the interval
+        interval_start_frame = interval_start * fps
+        
+        # Extract frames at exact time points
         for second in range(interval_duration):
             for frame_idx in range(frames_per_second):
-                # Calculate position for evenly spaced frames within the second
-                offset = (frame_step * frame_idx) + (frame_step // 2)
-                frame_position = (interval_start + second) * fps + offset
+                # Calculate exact frame position for this time point
+                exact_second = second + (frame_idx / frames_per_second)
+                frame_position = int(interval_start_frame + (exact_second * fps))
                 
                 # Break if we've reached the end of the video
                 if frame_position >= total_frames:
@@ -61,7 +64,10 @@ def preprocess_recording(recording_path: str, frames_per_second: int = 1) -> Lis
                 ret, frame = cap.read()
                 
                 if ret:
-                    interval_frames.append(frame)
+                    # Get the actual timestamp from the video
+                    actual_msec = cap.get(cv2.CAP_PROP_POS_MSEC)
+                    exact_time = actual_msec / 1000.0  # Convert milliseconds to seconds
+                    interval_frames.append((exact_time, frame))
         
         # Only add intervals that have frames
         if interval_frames:
@@ -72,11 +78,18 @@ def preprocess_recording(recording_path: str, frames_per_second: int = 1) -> Lis
     
     return intervals
 
-def timestamp_frames(frames: List[np.ndarray], start_time: int, frames_per_second: int) -> List[Tuple[str, np.ndarray]]:
+def timestamp_frames(frames: List[Tuple[float, np.ndarray]], start_time: int, frames_per_second: int) -> List[Tuple[str, np.ndarray]]:
+    """
+    Convert frames with exact timestamps into formatted timestamp strings.
+    
+    Args:
+        frames: List of tuples containing (exact_time, frame)
+        start_time: Start time of the interval (not used anymore as we have exact times)
+        frames_per_second: Frames per second (not used anymore as we have exact times)
+    """
     timestamped_frames = []
-    for i, frame in enumerate(frames):
-        frame_time = start_time + (i / frames_per_second)
-        hours, remainder = divmod(frame_time, 3600)
+    for exact_time, frame in frames:
+        hours, remainder = divmod(exact_time, 3600)
         minutes, seconds = divmod(remainder, 60)
         timestamp = f"{int(hours):02}:{int(minutes):02}:{int(seconds):02}"
         timestamped_frames.append((timestamp, frame))
