@@ -94,6 +94,14 @@ class S3Service:
         """Generate a presigned URL for deleting a file."""
         return self.generate_presigned_url(file_path, 'delete_object', expiration)
 
+    def check_file_exists(self, file_path: str) -> bool:
+        """Check if a file exists in S3."""
+        try:
+            self.s3_client.head_object(Bucket=self.bucket_name, Key=file_path)
+            return True
+        except ClientError:
+            return False
+
     def list_folder_contents(
         self,
         folder_path: str,
