@@ -1,5 +1,7 @@
 from pydantic import BaseModel
-from common.enums import RecordingType
+from app.models.recording import Recording
+from common.enums import RecordingType, VideoType
+
 
 class RecordingUploadUrl(BaseModel):
     content_type: str
@@ -15,3 +17,11 @@ class RecordingDownloadUrl(BaseModel):
 
 class RecordingDownloadUrlResponse(BaseModel):
     url: str
+
+class RecordingResponse(BaseModel):
+    recording: Recording
+
+class RecordingCreate(BaseModel):
+    file_name: str
+    file_size: int
+    file_type: VideoType
