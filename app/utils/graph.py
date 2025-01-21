@@ -12,6 +12,6 @@ def map_timestamped_frames_to_messages(timestamped_frames):
         messages.append(HumanMessage(content=[
         {"type": "text", "text": f"Timestamp: {timestamp}"},
         {"type": "image_url",
-                        "image_url": {"url": f'data:image/jpg;base64,{frame_base64}'}}
+                        "image_url": {"url": f'data:image/jpg;base64,{frame_base64}', "detail": "low"}}
         ]))
     return messages

@@ -33,6 +33,11 @@ def preprocess_recording(recording_path: str, frames_per_second: int = 1) -> Lis
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     duration = total_frames / fps
     
+    # After opening the video file, add these lines:
+    frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    print(f"Frame dimensions: {frame_width}x{frame_height}")
+    
     intervals = []
     interval_duration = 30  # seconds
     
@@ -160,9 +165,11 @@ def resize_frame(frame: np.ndarray, width: int = None, height: int = None) -> np
         
     h, w = frame.shape[:2]
     if width is None:
-        aspect = width / float(w)
+        # Calculate width based on height while maintaining aspect ratio
+        aspect = height / float(h)
         dim = (int(w * aspect), height)
     else:
+        # Calculate height based on width while maintaining aspect ratio
         aspect = width / float(w)
         dim = (width, int(h * aspect))
         
@@ -234,20 +241,20 @@ def analyze_frame_changes(frames: List[np.ndarray]) -> List[Tuple[int, float, np
     return changes
 
 # if __name__ == "__main__":
-#     intervals = preprocess_recording("recordings/test2.mov", 2)
-#     start_time, frames = intervals[1]
-#     timestamped_frames = timestamp_frames(frames, start_time, 2)
-#     for timestamp, frame in timestamped_frames:
-#         print(timestamp)
+#     intervals = preprocess_recording("recordings/test2.mov", 1)
+    # start_time, frames = intervals[1]
+    # timestamped_frames = timestamp_frames(frames, start_time, 2)
+    # for timestamp, frame in timestamped_frames:
+    #     print(timestamp)
     
-#     # Resize frames to standard width
-#     resized_frames = [resize_frame(frame, width=1280) for frame in frames]
+    # # Resize frames to standard width
+    # resized_frames = [resize_frame(frame, width=1280) for frame in frames]
     
-#     # Analyze changes between frames
-#     changes = analyze_frame_changes(resized_frames)
+    # # Analyze changes between frames
+    # changes = analyze_frame_changes(resized_frames)
     
-#     # Enhance frames with slightly increased brightness and contrast
-#     enhanced_frames = [enhance_frame(frame, brightness=1.1, contrast=1.2) for frame in resized_frames]
+    # # Enhance frames with slightly increased brightness and contrast
+    # enhanced_frames = [enhance_frame(frame, brightness=1.1, contrast=1.2) for frame in resized_frames]
     
-#     # Create enhanced video
-#     create_video_from_frames(enhanced_frames, "recordings/output_enhanced.mp4")
+    # # Create enhanced video
+    # create_video_from_frames(enhanced_frames, "recordings/output_enhanced.mp4")
