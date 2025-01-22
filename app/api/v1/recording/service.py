@@ -1,12 +1,12 @@
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
-from app.models.recording import Recording
-from schemas.recording_schema import RecordingUploadUrl, RecordingDownloadUrl, RecordingCreate
+from models.recording import Recording
+from .schema import RecordingUploadUrl, RecordingDownloadUrl, RecordingCreate
 from common.services.s3 import s3_service
 from common.services.logger import logger
-from app.api.v1.org.service import get_org
+from api.v1.org import service
 from common.enums import RecordingType, VideoType
-from recording.repository import RecordingRepository
+from .repository import RecordingRepository
 
 def validate_video_type(content_type: VideoType) -> None:
     """Validate that the content type is an allowed video format"""
@@ -49,7 +49,7 @@ def get_recording_upload_url(
         expiration: URL expiration time in seconds (default: 1 hour)
     """
     # Verify org exists
-    get_org(db, org_id)
+    service.get_org(db, org_id)
     
     # Validate input parameters
     validate_video_type(recording_upload_url.content_type)
@@ -76,7 +76,7 @@ def get_recording_download_url(
         expiration: URL expiration time in seconds (default: 1 hour)
     """
     # Verify org exists
-    get_org(db, org_id)
+    service.get_org(db, org_id)
      
     # Validate recording type
     validate_recording_type(recording_download_url.recording_type)
@@ -88,7 +88,7 @@ def get_recording_download_url(
 def create_recording(db: Session, org_id: int, recording: RecordingCreate) -> Recording:
     """Create a new recording"""
     # Verify org exists
-    get_org(db, org_id)
+    service.get_org(db, org_id)
 
     # Validate recording exists in S3
     validate_recording_exists_in_s3(recording.file_name, recording.file_type, org_id)

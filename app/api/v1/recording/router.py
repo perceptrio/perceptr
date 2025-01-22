@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from core.constants import APIPath
-from schemas.recording_schema import RecordingDownloadUrl, RecordingUploadUrl, RecordingUploadUrlResponse, RecordingDownloadUrlResponse
+from .schema import RecordingDownloadUrl, RecordingUploadUrl, RecordingUploadUrlResponse, RecordingDownloadUrlResponse
 from api.v1.recording import service
 from common.types import TokenPayload  
 from typing_extensions import Annotated
@@ -9,7 +9,7 @@ from common.middleware import GetPayload
 from sqlalchemy.orm import Session
 from database import get_db
 from typing import List
-from schemas.recording_schema import RecordingResponse, RecordingCreate
+from .schema import RecordingResponse, RecordingCreate
 from fastapi import status
 router = APIRouter(prefix=f"{APIPath.V1}/recordings", tags=["recordings"])
 

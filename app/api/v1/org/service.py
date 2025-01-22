@@ -1,7 +1,7 @@
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from models.org import Org
-from schemas.org_schema import OrgCreate, OrgUpdate
+from .schema import OrgCreate, OrgUpdate
 from utils.auth import get_password_hash, verify_password
 from .repository import OrgRepository
 
