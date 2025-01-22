@@ -14,3 +14,10 @@ class VideoType(str, Enum):
     OGG = 'video/ogg'
     # for testing purposes
     JPEG = 'image/jpeg'
+
+class IntervalCategory(Enum):
+    NORMAL = "Normal"
+    BUG = "Bug"
+    USABILITY_ISSUE = "Usability Issue"
+    PERFORMANCE_ISSUE = "Performance Issue"
+    ENHANCEMENT = "Enhancement"

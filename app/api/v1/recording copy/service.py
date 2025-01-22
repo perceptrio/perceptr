@@ -1,12 +1,12 @@
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from models.recording import Recording
-from .schema import RecordingUploadUrl, RecordingDownloadUrl, RecordingCreate
+from api.v1.recording.schema import RecordingUploadUrl, RecordingDownloadUrl, RecordingCreate
 from common.services.s3 import s3_service
 from common.services.logger import logger
-from api.v1.org import service
+from org import service
 from common.enums import RecordingType, VideoType
-from .repository import RecordingRepository
+from recording.repository import RecordingRepository
 
 def validate_video_type(content_type: VideoType) -> None:
     """Validate that the content type is an allowed video format"""

@@ -7,8 +7,8 @@ from typing_extensions import Annotated
 from common.middleware import GetPayload, get_current_org
 
 from database import get_db
-from app.api.v1.org import service
-from schemas.org_schema import OrgCreate, OrgResponse, OrgUpdate, OrgLogin, Token
+from api.v1.org import service
+from api.v1.org.schema import OrgCreate, OrgResponse, OrgUpdate, OrgLogin, Token
 from utils.auth import create_access_token, create_refresh_token
 from core.constants import APIPath
 
