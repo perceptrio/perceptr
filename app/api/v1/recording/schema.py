@@ -24,10 +24,8 @@ class RecordingCreate(BaseModel):
     file_size: int
     file_type: VideoType
 
-class RecordingResponse(RecordingCreate):
-    id: int
-    created_at: datetime
-    updated_at: datetime
 
-    class Config:
-        from_attributes = True
+class RecordingAnalysis(BaseModel):
+    user_id: int
+    recording_id: int
+    recording_path: str

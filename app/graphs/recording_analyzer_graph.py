@@ -9,8 +9,7 @@ from settings import settings
 from langchain_core.runnables import RunnableConfig
 from langchain_core.messages import SystemMessage, HumanMessage
 from langfuse.decorators import langfuse_context, observe
-from logger import get_module_logger
-logger = get_module_logger(__name__)
+from common.services.logger import logger
 import os
 import time
 os.environ["LANGFUSE_PUBLIC_KEY"] = settings.LANGFUSE_PUBLIC_KEY
