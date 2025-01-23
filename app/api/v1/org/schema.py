@@ -2,23 +2,23 @@ from pydantic import BaseModel, EmailStr
 from datetime import datetime
 from typing import Optional
 
-class UserBase(BaseModel):
+class OrgBase(BaseModel):
     name: str
     email: EmailStr
 
-class UserCreate(UserBase):
+class OrgCreate(OrgBase):
     password: str
 
-class UserLogin(BaseModel):
+class OrgLogin(BaseModel):
     email: EmailStr
     password: str
 
-class UserUpdate(BaseModel):
+class OrgUpdate(BaseModel):
     name: Optional[str] = None
     email: Optional[EmailStr] = None
     password: Optional[str] = None
 
-class UserResponse(UserBase):
+class OrgResponse(OrgBase):
     id: int
     joined_at: datetime
 
@@ -27,7 +27,5 @@ class UserResponse(UserBase):
 
 class Token(BaseModel):
     access_token: str
+    refresh_token: str
     token_type: str
-
-class TokenData(BaseModel):
-    email: str | None = None 

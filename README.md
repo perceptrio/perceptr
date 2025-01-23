@@ -73,22 +73,22 @@ The API will be available at `http://localhost:8000`
 ## API Endpoints
 
 ### Authentication
-- `POST /api/v1/users/signup` - Create new account
-- `POST /api/v1/users/login` - Login with JSON body
-- `POST /api/v1/users/token` - OAuth2 compatible login
-- `GET /api/v1/users/me` - Get current user info
+- `POST /api/v1/orgs/signup` - Create new account
+- `POST /api/v1/orgs/login` - Login with JSON body
+- `POST /api/v1/orgs/token` - OAuth2 compatible login
+- `GET /api/v1/orgs/me` - Get current organization info
 
-### User Management
-- `GET /api/v1/users` - List all users
-- `GET /api/v1/users/{user_id}` - Get specific user
-- `PUT /api/v1/users/{user_id}` - Update user
-- `DELETE /api/v1/users/{user_id}` - Delete user
+### Admin Organization Management
+- `GET /api/v1/orgs` - List all orgs
+- `GET /api/v1/orgs/{org_id}` - Get specific organization
+- `PUT /api/v1/orgs/{org_id}` - Update organization
+- `DELETE /api/v1/orgs/{org_id}` - Delete organization
 
 ## Example API Usage
 
 ### Create Account
 ```bash
-curl -X POST http://localhost:8000/api/v1/users/signup \
+curl -X POST http://localhost:8000/api/v1/orgs/signup \
   -H "Content-Type: application/json" \
   -d '{
     "name": "John Doe",
@@ -99,7 +99,7 @@ curl -X POST http://localhost:8000/api/v1/users/signup \
 
 ### Login
 ```bash
-curl -X POST http://localhost:8000/api/v1/users/login \
+curl -X POST http://localhost:8000/api/v1/orgs/login \
   -H "Content-Type: application/json" \
   -d '{
     "email": "john@example.com",
@@ -109,6 +109,6 @@ curl -X POST http://localhost:8000/api/v1/users/login \
 
 ### Get User Profile
 ```bash
-curl http://localhost:8000/api/v1/users/me \
+curl http://localhost:8000/api/v1/orgs/me \
   -H "Authorization: Bearer your-token-here"
 ```

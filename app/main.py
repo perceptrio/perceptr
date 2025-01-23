@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import user_router, recording_router
-# from database import engine, Base
+from api.v1.org import router as org_router
+from api.v1.recording import router as recording_router
 
 app = FastAPI()
 
@@ -17,8 +17,9 @@ app.add_middleware(
 )
 
 # Include routers
-app.include_router(user_router.router)
+app.include_router(org_router.router)
 app.include_router(recording_router.router)
+
 @app.get("/")
 async def root():
     return {"message": "Hello World"}

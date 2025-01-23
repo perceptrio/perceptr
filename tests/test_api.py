@@ -4,7 +4,7 @@ import json
 BASE_URL = "http://localhost:8000/api/v1"
 
 def test_signup_and_login():
-    # 1. Create a new user
+    # 1. Create a new organization
     signup_data = {
         "name": "Test User",
         "email": "test@example.com",
@@ -12,7 +12,7 @@ def test_signup_and_login():
     }
     
     response = requests.post(
-        f"{BASE_URL}/users/signup",
+        f"{BASE_URL}/orgs/signup",
         json=signup_data
     )
     print("\nSignup Response:", json.dumps(response.json(), indent=2))
@@ -24,7 +24,7 @@ def test_signup_and_login():
     }
     
     response = requests.post(
-        f"{BASE_URL}/users/login",
+        f"{BASE_URL}/orgs/login",
         json=login_data
     )
     print("\nLogin Response:", json.dumps(response.json(), indent=2))
@@ -33,7 +33,7 @@ def test_signup_and_login():
     # 3. Get user profile with token
     headers = {"Authorization": f"Bearer {token}"}
     response = requests.get(
-        f"{BASE_URL}/users/me",
+        f"{BASE_URL}/orgs/me",
         headers=headers
     )
     print("\nProfile Response:", json.dumps(response.json(), indent=2))
