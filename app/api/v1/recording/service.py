@@ -3,13 +3,16 @@ from sqlalchemy.orm import Session
 from models.recording import Recording
 from .schema import RecordingUploadUrl, RecordingDownloadUrl, RecordingCreate
 from common.services.s3 import s3_service
+from common.services.files_downloader import FilesDownloader
 from common.services.logger import logger
 from api.v1.org import service
 from common.enums import RecordingType, VideoType
 from .repository import RecordingRepository
 from graphs.recording_analyzer_graph import RecordingAnalyzerGraph
 from utils.recording import preprocess_recording, timestamp_frames, resize_frame
-
+from models.recording_interval import RecordingInterval
+from api.v1.recording_intervals import service as recording_intervals_service
+import json
 
 def validate_video_type(content_type: VideoType) -> None:
     """Validate that the content type is an allowed video format"""
@@ -136,19 +139,43 @@ FRAMES_PER_SECOND = 1
 RECORDINGS_PREFIX = "recordings/"
 FRAME_HEIGHT = 512
 
-def analyze_recording(user_id: str, recording_id: str, recording_path: str) -> dict:
+def analyze_recording(db: Session, org_id: int, recording_id: int) -> dict:
+    repository = RecordingRepository(db)
+    recording = repository.get_by_id(recording_id, org_id)
+    if not recording:
+        raise HTTPException(status_code=404, detail="Recording not found")
 
     graph = RecordingAnalyzerGraph()
-    recording_path = f"{RECORDINGS_PREFIX}/{recording_path}"
-    preprocessed_recording_intervals = preprocess_recording(recording_path, frames_per_second=FRAMES_PER_SECOND)
-    response = []
-    # last_three_intervals = preprocessed_recording_intervals[-2:]
-    for interval in preprocessed_recording_intervals:
-        start_time, frames_with_times = interval
-        print(f"Processing interval {start_time}")
-        resized_frames = [(t, resize_frame(f, height=FRAME_HEIGHT)) for t, f in frames_with_times]
-        timestamped_frames = timestamp_frames(resized_frames, start_time, FRAMES_PER_SECOND)
-        interval_response = graph.analyze_recording(user_id, recording_id, recording_path, timestamped_frames)
-        response.append(interval_response["recording_analysis"].json())
 
-    return response
+    with FilesDownloader(s3_service.get_s3_client()) as downloader:
+        local_recording_path = downloader.download_file_from_s3(f"{org_id}/recordings/{recording.file_name}")
+        preprocessed_recording_intervals = preprocess_recording(local_recording_path, frames_per_second=FRAMES_PER_SECOND)
+        recording_intervals = []
+        for interval in preprocessed_recording_intervals:
+            start_time, frames_with_times = interval
+            print(f"Processing interval {start_time}")
+            resized_frames = [(t, resize_frame(f, height=FRAME_HEIGHT)) for t, f in frames_with_times]
+            timestamped_frames = timestamp_frames(resized_frames, start_time, FRAMES_PER_SECOND)
+            interval_response = graph.analyze_recording(org_id, recording_id, timestamped_frames)
+            recording_intervals_analysis = interval_response["recording_analysis"].intervals
+
+            for recording_interval_analysis in recording_intervals_analysis:
+                # Convert each TimestampDescription to JSON and then serialize the list
+                timestamp_descriptions_json = json.dumps([td.json() for td in recording_interval_analysis.timestamp_descriptions])
+                
+                recording_interval = RecordingInterval(
+                    recording_id=recording_id,
+                    start_time=recording_interval_analysis.start_time,
+                    end_time=recording_interval_analysis.end_time,
+                    category=recording_interval_analysis.category,
+                    issue=recording_interval_analysis.issue,
+                    short_title=recording_interval_analysis.short_title,
+                    timestamp_descriptions=timestamp_descriptions_json,
+                    description=recording_interval_analysis.description,
+                )
+                recording_intervals.append(recording_interval)
+
+    res = recording_intervals_service.batch_create_recording_intervals(db, recording_intervals)
+    logger.info(f"Created {len(res)} recording intervals")
+    return res
+

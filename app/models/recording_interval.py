@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Time
+from sqlalchemy.types import JSON
 from .base import Base
 from common.enums import IntervalCategory
 
@@ -9,12 +10,13 @@ class RecordingInterval(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     recording_id = Column(Integer, ForeignKey("recording.id"), nullable=False)
-    start_time = Column(DateTime, nullable=False)
-    end_time = Column(DateTime, nullable=False)
-    summary = Column(String, nullable=False)
+    start_time = Column(Time, nullable=False)
+    end_time = Column(Time, nullable=False)
+    description = Column(String, nullable=False)
     category = Column(String, nullable=False)  # Will store enum values as strings
     issue = Column(String)
-    
+    short_title = Column(String, nullable=False)
+    timestamp_descriptions = Column(JSON, nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
     updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), nullable=False)
     deleted_at = Column(DateTime, nullable=True)

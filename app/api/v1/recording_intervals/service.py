@@ -1,8 +1,8 @@
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from models.recording_interval import RecordingInterval
-from recording_intervals.repository import RecordingIntervalRepository
-from recording_intervals.schema import RecordingIntervalCreate, RecordingIntervalUpdate
+from .repository import RecordingIntervalRepository
+from .schema import RecordingIntervalCreate, RecordingIntervalUpdate
 
 def create_recording_interval(db: Session, recording_interval: RecordingIntervalCreate) -> RecordingInterval:
     """Create a new recording interval"""
@@ -46,3 +46,7 @@ def soft_delete_recording_interval(db: Session, recording_interval_id: int, reco
         raise HTTPException(status_code=404, detail="Recording interval not found")
     repository.soft_delete(recording_interval)
     
+
+def batch_create_recording_intervals(db: Session, recording_intervals: list[RecordingInterval]) -> list[RecordingInterval]:
+    repository = RecordingIntervalRepository(db)
+    return repository.batch_create(recording_intervals)

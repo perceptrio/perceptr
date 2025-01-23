@@ -44,9 +44,9 @@ def delete_recording(recording_id: int, payload: Annotated[TokenPayload, Depends
     return
 
 
-@router.post("/analyze")
-def analyze_recording(request: RecordingAnalysis, payload: Annotated[TokenPayload, Depends(GetPayload(type="access"))], db: Session = Depends(get_db)):
+@router.get("/{recording_id}/analyze")
+def analyze_recording(recording_id: int, payload: Annotated[TokenPayload, Depends(GetPayload(type="access"))], db: Session = Depends(get_db)):
     try:
-        return service.analyze_recording(db, request.user_id, request.recording_id, request.recording_path)
+        return service.analyze_recording(db, payload.org.id, recording_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

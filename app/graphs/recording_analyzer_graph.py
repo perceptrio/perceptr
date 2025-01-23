@@ -52,7 +52,6 @@ class RecordingAnalysis(BaseModel):
 
 
 class State(TypedDict):
-    recording_path: str
     timestamped_frames: List[Tuple[str, np.ndarray]]
     recording_analysis: RecordingAnalysis
 
@@ -223,11 +222,11 @@ class RecordingAnalyzerGraph():
         return self.graph
 
     @observe()
-    def analyze_recording(self, user_id: str, recording_id: str, recording_path: str, timestamped_frames: List[Tuple[str, np.ndarray]]) -> dict:
+    def analyze_recording(self, org_id: str, recording_id: str, timestamped_frames: List[Tuple[str, np.ndarray]]) -> dict:
 
         langfuse_context.update_current_trace(
             session_id=recording_id,
-            user_id=user_id,
+            user_id=org_id,
         )
 
         langfuse_handler = langfuse_context.get_current_langchain_handler()
@@ -243,7 +242,6 @@ class RecordingAnalyzerGraph():
         try:
             resp = self.graph.invoke(
                 {
-                    "recording_path": recording_path,
                     "timestamped_frames": timestamped_frames
                 },
                 config=config,
