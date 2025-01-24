@@ -15,4 +15,4 @@ RUN poetry config virtualenvs.create false && poetry install --no-interaction --
 COPY app/ .
 
 # Set the default command to run the Python script (replace with your actual command)
-CMD ["poetry", "run", "uvicorn", "main:app", "--reload", "--workers", "4", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["poetry", "run", "uvicorn", "main:app", "--workers", "4", "--host", "0.0.0.0", "--port", "8000"]

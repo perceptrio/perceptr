@@ -35,3 +35,12 @@ class RecordingIntervalRepository:
     def delete(self, recording_interval: RecordingInterval) -> None:
         self.db.delete(recording_interval)
         self.db.commit()
+
+    def batch_create(self, recording_intervals: list[RecordingInterval]) -> list[RecordingInterval]:
+        self.db.add_all(recording_intervals)
+        self.db.commit()
+        return recording_intervals
+
+    def batch_delete_with_recording_id(self, recording_id: int) -> None:
+        self.db.query(RecordingInterval).filter(RecordingInterval.recording_id == recording_id).delete()
+        self.db.commit()
