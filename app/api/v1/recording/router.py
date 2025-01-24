@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 
 from core.constants import APIPath
 from .schema import RecordingDownloadUrl, RecordingUploadUrl, RecordingUploadUrlResponse, RecordingDownloadUrlResponse
@@ -45,8 +45,10 @@ def delete_recording(recording_id: int, payload: Annotated[TokenPayload, Depends
 
 
 @router.get("/{recording_id}/analyze")
-def analyze_recording(recording_id: int, payload: Annotated[TokenPayload, Depends(GetPayload(type="access"))], db: Session = Depends(get_db)):
+def analyze_recording(recording_id: int, background_tasks: BackgroundTasks,
+ payload: Annotated[TokenPayload, Depends(GetPayload(type="access"))], db: Session = Depends(get_db)):
     try:
-        return service.analyze_recording(db, payload.org.id, recording_id)
+        background_tasks.add_task(service.analyze_recording, db, payload.org.id, recording_id)
+        return {"message": f"Analysis started for recording {recording_id}"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

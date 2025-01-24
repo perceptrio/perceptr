@@ -40,3 +40,7 @@ class RecordingIntervalRepository:
         self.db.add_all(recording_intervals)
         self.db.commit()
         return recording_intervals
+
+    def batch_delete_with_recording_id(self, recording_id: int) -> None:
+        self.db.query(RecordingInterval).filter(RecordingInterval.recording_id == recording_id).delete()
+        self.db.commit()

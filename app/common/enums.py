@@ -21,3 +21,9 @@ class IntervalCategory(Enum):
     USABILITY_ISSUE = "Usability Issue"
     PERFORMANCE_ISSUE = "Performance Issue"
     ENHANCEMENT = "Enhancement"
+
+
+class AnalysisStatus(str, Enum):
+    PENDING = "pending"
+    COMPLETED = "completed"
+    FAILED = "failed"

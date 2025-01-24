@@ -50,3 +50,12 @@ def soft_delete_recording_interval(db: Session, recording_interval_id: int, reco
 def batch_create_recording_intervals(db: Session, recording_intervals: list[RecordingInterval]) -> list[RecordingInterval]:
     repository = RecordingIntervalRepository(db)
     return repository.batch_create(recording_intervals)
+
+def replace_recording_intervals(db: Session, recording_id: int, recording_intervals: list[RecordingInterval]) -> list[RecordingInterval]:
+    repository = RecordingIntervalRepository(db)
+    repository.batch_delete_with_recording_id(recording_id)
+    return repository.batch_create(recording_intervals)
+
+def check_recording_intervals_with_recording_id(db: Session, recording_id: int) -> bool:
+    repository = RecordingIntervalRepository(db)
+    return repository.get_by_recording_id(recording_id) is not None

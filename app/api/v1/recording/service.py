@@ -13,6 +13,7 @@ from utils.recording import preprocess_recording, timestamp_frames, resize_frame
 from models.recording_interval import RecordingInterval
 from api.v1.recording_intervals import service as recording_intervals_service
 import json
+from common.enums import AnalysisStatus
 
 def validate_video_type(content_type: VideoType) -> None:
     """Validate that the content type is an allowed video format"""
@@ -133,49 +134,78 @@ def soft_delete_recording(db: Session, recording_id: int, org_id: int) -> None:
     if not recording:
         raise HTTPException(status_code=404, detail="Recording not found")
     repository.soft_delete(recording)
-    
+
+
+
+def post_analysis_process(callback=None):
+    def decorator(func):
+        def wrapper(db: Session, org_id: int, recording_id: int, *args, **kwargs):
+            result = func(db, org_id, recording_id, *args, **kwargs)
+            logger.info(f"Analysis Process Completed - Recording: {recording_id}")
+            return result
+        return wrapper
+    return decorator
+
 
 FRAMES_PER_SECOND = 1
-RECORDINGS_PREFIX = "recordings/"
 FRAME_HEIGHT = 512
 
+@post_analysis_process()
 def analyze_recording(db: Session, org_id: int, recording_id: int) -> dict:
-    repository = RecordingRepository(db)
-    recording = repository.get_by_id(recording_id, org_id)
-    if not recording:
-        raise HTTPException(status_code=404, detail="Recording not found")
+    try:
+        repository = RecordingRepository(db)
+        recording = repository.get_by_id(recording_id, org_id)
+        if not recording:
+            raise HTTPException(status_code=404, detail="Recording not found")
 
-    graph = RecordingAnalyzerGraph()
+        try:
+            graph = RecordingAnalyzerGraph()
 
-    with FilesDownloader(s3_service.get_s3_client()) as downloader:
-        local_recording_path = downloader.download_file_from_s3(f"{org_id}/recordings/{recording.file_name}")
-        preprocessed_recording_intervals = preprocess_recording(local_recording_path, frames_per_second=FRAMES_PER_SECOND)
-        recording_intervals = []
-        for interval in preprocessed_recording_intervals:
-            start_time, frames_with_times = interval
-            print(f"Processing interval {start_time}")
-            resized_frames = [(t, resize_frame(f, height=FRAME_HEIGHT)) for t, f in frames_with_times]
-            timestamped_frames = timestamp_frames(resized_frames, start_time, FRAMES_PER_SECOND)
-            interval_response = graph.analyze_recording(org_id, recording_id, timestamped_frames)
-            recording_intervals_analysis = interval_response["recording_analysis"].intervals
+            with FilesDownloader(s3_service.get_s3_client()) as downloader:
+                local_recording_path = downloader.download_file_from_s3(f"{org_id}/recordings/{recording.file_name}")
+                preprocessed_recording_intervals = preprocess_recording(local_recording_path, frames_per_second=FRAMES_PER_SECOND)
+                recording_intervals = []
+                for interval in preprocessed_recording_intervals:
+                    start_time, frames_with_times = interval
+                    print(f"Processing interval {start_time}")
+                    resized_frames = [(t, resize_frame(f, height=FRAME_HEIGHT)) for t, f in frames_with_times]
+                    timestamped_frames = timestamp_frames(resized_frames, start_time, FRAMES_PER_SECOND)
+                    interval_response = graph.analyze_recording(org_id, recording_id, timestamped_frames)
+                    recording_intervals_analysis = interval_response["recording_analysis"].intervals
 
-            for recording_interval_analysis in recording_intervals_analysis:
-                # Convert each TimestampDescription to JSON and then serialize the list
-                timestamp_descriptions_json = json.dumps([td.json() for td in recording_interval_analysis.timestamp_descriptions])
-                
-                recording_interval = RecordingInterval(
-                    recording_id=recording_id,
-                    start_time=recording_interval_analysis.start_time,
-                    end_time=recording_interval_analysis.end_time,
-                    category=recording_interval_analysis.category,
-                    issue=recording_interval_analysis.issue,
-                    short_title=recording_interval_analysis.short_title,
-                    timestamp_descriptions=timestamp_descriptions_json,
-                    description=recording_interval_analysis.description,
-                )
-                recording_intervals.append(recording_interval)
+                    for recording_interval_analysis in recording_intervals_analysis:
+                        # Convert each TimestampDescription to JSON and then serialize the list
+                        timestamp_descriptions_json = json.dumps([td.json() for td in recording_interval_analysis.timestamp_descriptions])
+                        
+                        recording_interval = RecordingInterval(
+                            recording_id=recording_id,
+                            start_time=recording_interval_analysis.start_time,
+                            end_time=recording_interval_analysis.end_time,
+                            category=recording_interval_analysis.category,
+                            issue=recording_interval_analysis.issue,
+                            short_title=recording_interval_analysis.short_title,
+                            timestamp_descriptions=timestamp_descriptions_json,
+                            description=recording_interval_analysis.description,
+                        )
+                        recording_intervals.append(recording_interval)
 
-    res = recording_intervals_service.batch_create_recording_intervals(db, recording_intervals)
-    logger.info(f"Created {len(res)} recording intervals")
-    return res
+                if recording_intervals_service.check_recording_intervals_with_recording_id(db, recording_id):
+                    recording_intervals_service.replace_recording_intervals(db, recording_id, recording_intervals)
+                else:
+                    recording_intervals_service.batch_create_recording_intervals(db, recording_intervals)
+
+            recording.set_analysis_status(AnalysisStatus.COMPLETED)
+            recording.analysis_error = None
+            db.commit()
+            logger.info(f"Analysis completed for recording {recording_id}")
+            return
+        except Exception as e:
+            logger.error(f"Error analyzing recording {recording_id}: {e}")
+            recording.set_analysis_status(AnalysisStatus.FAILED)
+            recording.analysis_error = str(e)
+            db.commit()
+            return
+
+    except Exception as e:
+        logger.error(f"Error analyzing recording {recording_id}: {e}")
 
