@@ -135,12 +135,17 @@ def soft_delete_recording(db: Session, recording_id: int, org_id: int) -> None:
         raise HTTPException(status_code=404, detail="Recording not found")
     repository.soft_delete(recording)
 
-
+def check_recording_belonging_to_org(db: Session, recording_id: int, org_id: int) -> None:
+    repository = RecordingRepository(db)
+    recording = repository.get_by_id(recording_id, org_id)
+    if not recording:
+        raise HTTPException(status_code=404, detail="Recording not found, or does not belong to the organization")
+    return recording
 
 def post_analysis_process(callback=None):
     def decorator(func):
-        def wrapper(db: Session, org_id: int, recording_id: int, *args, **kwargs):
-            result = func(db, org_id, recording_id, *args, **kwargs)
+        def wrapper(db: Session, org_id: int, recording_id: int, recording: Recording, *args, **kwargs):
+            result = func(db, org_id, recording_id, recording, *args, **kwargs)
             logger.info(f"Analysis Process Completed - Recording: {recording_id}")
             return result
         return wrapper
@@ -151,13 +156,7 @@ FRAMES_PER_SECOND = 1
 FRAME_HEIGHT = 512
 
 @post_analysis_process()
-def analyze_recording(db: Session, org_id: int, recording_id: int) -> dict:
-    try:
-        repository = RecordingRepository(db)
-        recording = repository.get_by_id(recording_id, org_id)
-        if not recording:
-            raise HTTPException(status_code=404, detail="Recording not found")
-
+def analyze_recording(db: Session, org_id: int, recording_id: int, recording: Recording) -> dict:
         try:
             graph = RecordingAnalyzerGraph()
 
@@ -205,7 +204,4 @@ def analyze_recording(db: Session, org_id: int, recording_id: int) -> dict:
             recording.analysis_error = str(e)
             db.commit()
             return
-
-    except Exception as e:
-        logger.error(f"Error analyzing recording {recording_id}: {e}")
 

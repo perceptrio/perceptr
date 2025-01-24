@@ -48,7 +48,8 @@ def delete_recording(recording_id: int, payload: Annotated[TokenPayload, Depends
 def analyze_recording(recording_id: int, background_tasks: BackgroundTasks,
  payload: Annotated[TokenPayload, Depends(GetPayload(type="access"))], db: Session = Depends(get_db)):
     try:
-        background_tasks.add_task(service.analyze_recording, db, payload.org.id, recording_id)
+        recording = service.check_recording_belonging_to_org(db, recording_id, payload.org.id)
+        background_tasks.add_task(service.analyze_recording, db, payload.org.id, recording_id, recording)
         return {"message": f"Analysis started for recording {recording_id}"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
