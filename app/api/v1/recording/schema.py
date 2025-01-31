@@ -9,18 +9,22 @@ class RecordingUploadUrl(BaseModel):
     recording_type: RecordingType = RecordingType.ORIGINAL
     expiration: int = 3600
 
+
 class RecordingUploadUrlResponse(BaseModel):
     url: str
+
 
 class RecordingDownloadUrl(BaseModel):
     recording_type: RecordingType = RecordingType.ORIGINAL
     expiration: int = 3600
 
+
 class RecordingDownloadUrlResponse(BaseModel):
     url: str
- 
+
+
 class RecordingCreate(BaseModel):
-    file_name: str
+    file_name: str  # folder name of file (excluding the extension)
     file_size: int
     file_type: VideoType
 
