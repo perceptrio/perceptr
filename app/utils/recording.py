@@ -83,6 +83,79 @@ def preprocess_recording(recording_path: str, frames_per_second: int = 1) -> Lis
     
     return intervals
 
+def extract_all_frames(recording_path: str, frames_per_second: int = 1) -> List[Tuple[str, np.ndarray]]:
+    """
+    Extracts frames from a video at specified rate with their exact timestamps.
+    
+    Args:
+        recording_path (str): Path to the video recording file
+        frames_per_second (int): Number of frames to extract per second (default: 1)
+        
+    Returns:
+        List[Tuple[str, np.ndarray]]: List of tuples containing:
+            - Formatted timestamp string in HH:MM:SS format
+            - Frame data as numpy array
+    """
+    if not os.path.exists(recording_path):
+        raise FileNotFoundError(f"Recording file not found: {recording_path}")
+    
+    if frames_per_second <= 0:
+        raise ValueError("frames_per_second must be positive")
+    
+    # Open the video file
+    cap = cv2.VideoCapture(recording_path)
+    if not cap.isOpened():
+        raise ValueError(f"Could not open video file: {recording_path}")
+    
+    # Get video properties
+    fps = int(cap.get(cv2.CAP_PROP_FPS))
+    duration = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0  # Get duration in seconds
+    
+    # If duration is 0, calculate it from frames (fallback)
+    if duration == 0:
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        duration = total_frames / fps
+    
+    frames = []
+    seen_timestamps = set()
+    
+    # Read first frame to get dimensions
+    ret, first_frame = cap.read()
+    if not ret:
+        raise ValueError("Could not read first frame from video")
+    
+    # Extract frames at exact time points
+    for second in range(int(duration)):
+        for frame_idx in range(frames_per_second):
+            # Calculate exact time for this frame
+            exact_second = second + (frame_idx / frames_per_second)
+            
+            # Set position in milliseconds for more accurate seeking
+            cap.set(cv2.CAP_PROP_POS_MSEC, exact_second * 1000)
+            ret, frame = cap.read()
+            
+            if ret:
+                # Format timestamp as HH:MM:SS
+                hours, remainder = divmod(exact_second, 3600)
+                minutes, seconds = divmod(remainder, 60)
+                timestamp = f"{int(hours):02}:{int(minutes):02}:{int(seconds):02}"
+                
+                # Only add frame if we haven't seen this timestamp before
+                if timestamp not in seen_timestamps:
+                    frames.append((timestamp, frame))
+                    seen_timestamps.add(timestamp)
+            else:
+                # If we can't read a frame, we've reached the end
+                break
+        
+        if not ret:
+            break
+    
+    # Release the video capture
+    cap.release()
+    
+    return frames
+
 def timestamp_frames(frames: List[Tuple[float, np.ndarray]], start_time: int, frames_per_second: int) -> List[Tuple[str, np.ndarray]]:
     """
     Convert frames with exact timestamps into formatted timestamp strings.
@@ -239,6 +312,47 @@ def analyze_frame_changes(frames: List[np.ndarray]) -> List[Tuple[int, float, np
             change_percent = (diff_frame > 0).mean() * 100
             changes.append((i, change_percent, diff_frame))
     return changes
+
+def save_frame_to_image(frame: np.ndarray, output_path: str) -> None:
+    cv2.imwrite(output_path, frame)
+
+def get_recording_duration(recording_path: str) -> float:
+    """
+    Get the duration of a video recording in seconds.
+    This is a fast operation as it only reads metadata without processing frames.
+    
+    Args:
+        recording_path (str): Path to the video file
+        
+    Returns:
+        float: Duration in seconds
+        
+    Raises:
+        ValueError: If the video file cannot be opened
+        FileNotFoundError: If the file does not exist
+    """
+    if not os.path.exists(recording_path):
+        raise FileNotFoundError(f"Recording file not found: {recording_path}")
+        
+    cap = cv2.VideoCapture(recording_path)
+    if not cap.isOpened():
+        cap.release()
+        raise ValueError(f"Could not open video file: {recording_path}")
+    
+    try:
+        # Try getting duration directly first
+        duration = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
+        
+        # If direct duration is 0 or seems incorrect, calculate from frames
+        if duration <= 0:
+            fps = int(cap.get(cv2.CAP_PROP_FPS))
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            if fps > 0:  # Avoid division by zero
+                duration = total_frames / fps
+            
+        return duration
+    finally:
+        cap.release()  # Always release the capture object
 
 # if __name__ == "__main__":
 #     intervals = preprocess_recording("recordings/test2.mov", 1)

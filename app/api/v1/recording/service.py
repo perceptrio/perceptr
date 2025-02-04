@@ -9,11 +9,14 @@ from api.v1.org import service
 from common.enums import RecordingType, VideoType
 from .repository import RecordingRepository
 from graphs.recording_analyzer_graph import RecordingAnalyzerGraph
-from utils.recording import preprocess_recording, timestamp_frames, resize_frame
+from graphs.recording_summarizer_graph import RecordingSummarizerGraph
+from utils.recording import resize_frame, extract_all_frames, get_recording_duration
 from models.recording_interval import RecordingInterval
 from api.v1.recording_intervals import service as recording_intervals_service
 import json
 from common.enums import AnalysisStatus
+from typing import List, Tuple
+import numpy as np
 
 
 def validate_video_type(content_type: VideoType) -> None:
@@ -188,80 +191,136 @@ def post_analysis_process(callback=None):
 
 FRAMES_PER_SECOND = 1
 FRAME_HEIGHT = 512
+INTERVAL_DURATION = 30
 
+def summarize_recording(org_id: int, recording_id: int, recording_intervals_summary: str):
+    graph = RecordingSummarizerGraph()
+    summary_response = graph.summarize_recording(org_id, recording_id, recording_intervals_summary)
+    return summary_response["recording_summary"].summary, summary_response["recording_summary"].short_title
+
+def analyze_interval(org_id: int, recording_id: int, interval_frames: List[Tuple[str, np.ndarray]]):
+    graph = RecordingAnalyzerGraph()
+    resized_frames = [
+        (t, resize_frame(f, height=FRAME_HEIGHT))
+        for t, f in interval_frames
+    ]
+    interval_response = graph.analyze_recording(org_id, recording_id, resized_frames)
+    recording_intervals_analysis = interval_response[
+                    "recording_analysis"
+                ].intervals
+
+    recording_interval_summary = interval_response["recording_analysis"].summary
+
+    recording_intervals = []
+
+    categories = [interval_analysis.category for interval_analysis in recording_intervals_analysis]
+
+    for recording_interval_analysis in recording_intervals_analysis:
+    # Convert each TimestampDescription to JSON and then serialize the list
+        timestamp_descriptions_json = json.dumps(
+            [
+                td.json()
+                for td in recording_interval_analysis.timestamp_descriptions
+            ]
+        )
+
+        recording_interval = RecordingInterval(
+            recording_id=recording_id,
+            start_time=recording_interval_analysis.start_time,
+            end_time=recording_interval_analysis.end_time,
+            category=recording_interval_analysis.category,
+            issue=recording_interval_analysis.issue,
+            short_title=recording_interval_analysis.short_title,
+            timestamp_descriptions=timestamp_descriptions_json,
+            description=recording_interval_analysis.description,
+        )
+
+        recording_intervals.append(recording_interval)
+
+    return recording_intervals, recording_interval_summary, categories
+
+
+def process_tags(categories: List[str]) -> str:
+    tags = set(categories)
+    tags.discard("NORMAL")
+
+    if len(tags) == 0:
+        return ""
+    
+    return ", ".join(tags)
 
 @post_analysis_process()
 def analyze_recording(
     db: Session, org_id: int, recording_id: int, recording: Recording
 ) -> dict:
     try:
-        graph = RecordingAnalyzerGraph()
+        repository = RecordingRepository(db)
+        # Get a fresh instance of the recording that's attached to the current session
+        recording = repository.get_by_id(recording_id, org_id)
+        if not recording:
+            raise ValueError(f"Recording {recording_id} not found")
 
         with FilesDownloader(s3_service.get_s3_client()) as downloader:
             local_recording_path = downloader.download_file_from_s3(
                 f"{org_id}/recordings/{recording.file_name}"
             )
-            preprocessed_recording_intervals = preprocess_recording(
-                local_recording_path, frames_per_second=FRAMES_PER_SECOND
-            )
-            recording_intervals = []
-            for interval in preprocessed_recording_intervals:
-                start_time, frames_with_times = interval
-                print(f"Processing interval {start_time}")
-                resized_frames = [
-                    (t, resize_frame(f, height=FRAME_HEIGHT))
-                    for t, f in frames_with_times
-                ]
-                timestamped_frames = timestamp_frames(
-                    resized_frames, start_time, FRAMES_PER_SECOND
-                )
-                interval_response = graph.analyze_recording(
-                    org_id, recording_id, timestamped_frames
-                )
-                recording_intervals_analysis = interval_response[
-                    "recording_analysis"
-                ].intervals
 
-                for recording_interval_analysis in recording_intervals_analysis:
-                    # Convert each TimestampDescription to JSON and then serialize the list
-                    timestamp_descriptions_json = json.dumps(
-                        [
-                            td.json()
-                            for td in recording_interval_analysis.timestamp_descriptions
-                        ]
-                    )
+            timestamped_frames = extract_all_frames(local_recording_path, FRAMES_PER_SECOND)
+            print(f"Extracted {len(timestamped_frames)} frames from video")
 
-                    recording_interval = RecordingInterval(
-                        recording_id=recording_id,
-                        start_time=recording_interval_analysis.start_time,
-                        end_time=recording_interval_analysis.end_time,
-                        category=recording_interval_analysis.category,
-                        issue=recording_interval_analysis.issue,
-                        short_title=recording_interval_analysis.short_title,
-                        timestamp_descriptions=timestamp_descriptions_json,
-                        description=recording_interval_analysis.description,
-                    )
-                    recording_intervals.append(recording_interval)
+            if recording.file_duration is None:
+                recording.file_duration = get_recording_duration(local_recording_path)
+
+            analyzed_intervals = []
+            recording_intervals_summary = ""
+            categories = []
+            for i in range(0, len(timestamped_frames), INTERVAL_DURATION):
+                interval_frames = timestamped_frames[i:i + INTERVAL_DURATION]
+                timestamps = [t for t, _ in interval_frames]
+                print(f"Processing interval {timestamps}")
+                recording_intervals, recording_interval_summary, categories = analyze_interval(org_id, recording_id, interval_frames)
+                recording_interval_summary = f"Interval {timestamps[0]} - {timestamps[-1]} summary: {recording_interval_summary}"
+                recording_intervals_summary += "\n" + recording_interval_summary
+                categories.extend(categories)
+                # Update recording progress
+                recording.analysis_progress = i / len(timestamped_frames) * 100
+                repository.update(recording)
+                analyzed_intervals.extend(recording_intervals)
 
             if recording_intervals_service.check_recording_intervals_with_recording_id(
                 db, recording_id
             ):
                 recording_intervals_service.replace_recording_intervals(
-                    db, recording_id, recording_intervals
+                    db, recording_id, analyzed_intervals
                 )
             else:
                 recording_intervals_service.batch_create_recording_intervals(
-                    db, recording_intervals
+                    db, analyzed_intervals
                 )
 
+        logger.info(f"Summarizing recording {recording_id}")
+        recording_summary, recording_short_title = summarize_recording(org_id, recording_id, recording_intervals_summary)
+        logger.info(f"Recording summary: {recording_summary}")
+        logger.info(f"Recording short title: {recording_short_title}")
+        
+        # Update final recording state
+        recording.summary = recording_summary
+        recording.short_title = recording_short_title
         recording.set_analysis_status(AnalysisStatus.COMPLETED)
         recording.analysis_error = None
-        db.commit()
+        recording.analysis_progress = 100
+        recording.tags = process_tags(categories)
+        repository.update(recording)
+        
         logger.info(f"Analysis completed for recording {recording_id}")
         return
+
     except Exception as e:
-        logger.error(f"Error analyzing recording {recording_id}: {e}")
-        recording.set_analysis_status(AnalysisStatus.FAILED)
-        recording.analysis_error = str(e)
-        db.commit()
+        logger.error("Error analyzing recording", recording_id=recording_id, error=str(e))
+        # Get a fresh instance for error handling
+        recording = repository.get_by_id(recording_id, org_id)
+        if recording:
+            recording.set_analysis_status(AnalysisStatus.FAILED)
+            recording.analysis_error = str(e)
+            repository.update(recording)
         return
