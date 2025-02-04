@@ -11,14 +11,18 @@ from utils.auth import ALGORITHM, SECRET_KEY, REFRESH_SECRET_KEY
 from common.types import TokenPayload, AbstractOrg
 from common.services.logger import logger
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token" )
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/v1/orgs/token")
 
 
 class GetPayload:
     def __init__(self, type: Literal["access", "refresh"]):
         self.type = type
-    
-    async def __call__(self, token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
+
+    async def __call__(
+        self,
+        token: Annotated[str, Depends(oauth2_scheme)],
+        db: Session = Depends(get_db),
+    ):
         credentials_exception = HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="failed to authenticate, please login again",
@@ -28,7 +32,9 @@ class GetPayload:
             if self.type == "access":
                 payload_dict = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
             else:
-                payload_dict = jwt.decode(token, REFRESH_SECRET_KEY, algorithms=[ALGORITHM])
+                payload_dict = jwt.decode(
+                    token, REFRESH_SECRET_KEY, algorithms=[ALGORITHM]
+                )
         except JWTError as e:
             logger.error(f"Error decoding token in middleware: {e}")
             raise credentials_exception
@@ -41,18 +47,14 @@ class GetPayload:
             logger.error(f"Error getting org in middleware: {e}")
             raise credentials_exception
         payload = TokenPayload(
-            org=AbstractOrg(
-                id=org.id,
-                name=org.name,
-                email=org.email
-            )
+            org=AbstractOrg(id=org.id, name=org.name, email=org.email)
         )
         return payload
-        
-            
-    
 
-async def get_current_org(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> Org:
+
+async def get_current_org(
+    token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
+) -> Org:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -66,8 +68,8 @@ async def get_current_org(token: str = Depends(oauth2_scheme), db: Session = Dep
         token_data = TokenPayload(org_id=org_id)
     except JWTError:
         raise credentials_exception
-    
+
     org = db.query(Org).filter(Org.id == token_data.org_id).first()
     if org is None:
         raise credentials_exception
-    return org 
+    return org

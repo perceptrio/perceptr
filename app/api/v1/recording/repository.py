@@ -2,6 +2,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 from models.recording import Recording
 
+
 class RecordingRepository:
     def __init__(self, db: Session):
         self.db = db
@@ -13,11 +14,35 @@ class RecordingRepository:
         return recording
 
     def get_by_id(self, recording_id: int, org_id: int) -> Recording | None:
-        return self.db.query(Recording).filter(Recording.id == recording_id, Recording.org_id == org_id).first()
+        return (
+            self.db.query(Recording)
+            .filter(Recording.id == recording_id, Recording.org_id == org_id)
+            .first()
+        )
 
-
-    def get_all(self, org_id: int, skip: int = 0, limit: int = 100) -> list[Recording]:
-        return self.db.query(Recording).filter(Recording.org_id == org_id, Recording.deleted_at == None).offset(skip).limit(limit).all()
+    def get_all(
+        self,
+        org_id: int,
+        skip: int = 0,
+        limit: int = 100,
+        search: str = None,
+        start_date: datetime = None,
+        end_date: datetime = None,
+    ) -> list[Recording]:
+        query = self.db.query(Recording).filter(
+            Recording.org_id == org_id, Recording.deleted_at == None
+        )
+        if search:
+            query = query.filter(
+                (Recording.file_name.ilike(f"%{search}%"))
+                | (Recording.short_title.ilike(f"%{search}%"))
+                | (Recording.summary.ilike(f"%{search}%"))
+            )
+        if start_date:
+            query = query.filter(Recording.created_at >= start_date)
+        if end_date:
+            query = query.filter(Recording.created_at <= end_date)
+        return query.offset(skip).limit(limit).all()
 
     def update(self, recording: Recording) -> Recording:
         self.db.commit()

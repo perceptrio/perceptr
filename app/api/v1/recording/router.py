@@ -1,5 +1,7 @@
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 
+from models.recording import PydanticRecording
 from core.constants import APIPath
 from .schema import (
     RecordingDownloadUrl,
@@ -14,7 +16,7 @@ from common.middleware import GetPayload
 from sqlalchemy.orm import Session
 from database import get_db
 from typing import List
-from .schema import RecordingCreate, RecordingAnalysis
+from .schema import RecordingCreate
 from fastapi import status
 from common.services.s3 import s3_service
 
@@ -50,35 +52,40 @@ def get_recording_download_url(
     return RecordingDownloadUrlResponse(url=url)
 
 
-@router.post("/")
+@router.post("/", response_model=PydanticRecording)
 def create_recording(
     recording: RecordingCreate,
     payload: Annotated[TokenPayload, Depends(GetPayload(type="access"))],
     db: Session = Depends(get_db),
 ):
     recording = service.create_recording(db, payload.org.id, recording)
-    return recording
+    return recording.convert_model_to_schema()
 
 
-@router.get("/{recording_id}")
+@router.get("/{recording_id}", response_model=PydanticRecording)
 def get_recording(
     recording_id: int,
     payload: Annotated[TokenPayload, Depends(GetPayload(type="access"))],
     db: Session = Depends(get_db),
 ):
     recording = service.get_recording(db, recording_id, payload.org.id)
-    return recording
+    return recording.convert_model_to_schema()
 
 
-@router.get("/")
+@router.get("/", response_model=List[PydanticRecording])
 def get_recordings_for_org(
     payload: Annotated[TokenPayload, Depends(GetPayload(type="access"))],
     db: Session = Depends(get_db),
     skip: int = 0,
     limit: int = 100,
+    search: str = None,
+    start_date: datetime = None,
+    end_date: datetime = None,
 ):
-    recordings = service.get_recordings(db, payload.org.id, skip, limit)
-    return recordings
+    recordings = service.get_recordings(
+        db, payload.org.id, skip, limit, search, start_date, end_date
+    )
+    return [recording.convert_model_to_schema() for recording in recordings]
 
 
 @router.delete("/file/{key}", status_code=status.HTTP_204_NO_CONTENT)

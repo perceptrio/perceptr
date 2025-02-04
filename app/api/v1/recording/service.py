@@ -17,6 +17,22 @@ import json
 from common.enums import AnalysisStatus
 from typing import List, Tuple
 import numpy as np
+from datetime import datetime
+
+
+def convert_model_to_schema(recording: Recording) -> Recording:
+    return Recording(
+        id=recording.id,
+        file_name=recording.file_name,
+        file_size=recording.file_size,
+        file_type=recording.file_type,
+        org_id=recording.org_id,
+        created_at=recording.created_at,
+        updated_at=recording.updated_at,
+        deleted_at=recording.deleted_at,
+        analysis_status=recording.analysis_status,
+        analysis_error=recording.analysis_error,
+    )
 
 
 def validate_video_type(content_type: VideoType) -> None:
@@ -134,10 +150,16 @@ def get_recording(db: Session, recording_id: int, org_id: int) -> Recording:
 
 
 def get_recordings(
-    db: Session, org_id: int, skip: int = 0, limit: int = 100
+    db: Session,
+    org_id: int,
+    skip: int = 0,
+    limit: int = 100,
+    search: str = None,
+    start_date: datetime = None,
+    end_date: datetime = None,
 ) -> list[Recording]:
     repository = RecordingRepository(db)
-    return repository.get_all(org_id, skip, limit)
+    return repository.get_all(org_id, skip, limit, search, start_date, end_date)
 
 
 def soft_delete_recording(db: Session, recording_id: int, org_id: int) -> None:
@@ -193,35 +215,42 @@ FRAMES_PER_SECOND = 1
 FRAME_HEIGHT = 512
 INTERVAL_DURATION = 30
 
-def summarize_recording(org_id: int, recording_id: int, recording_intervals_summary: str):
-    graph = RecordingSummarizerGraph()
-    summary_response = graph.summarize_recording(org_id, recording_id, recording_intervals_summary)
-    return summary_response["recording_summary"].summary, summary_response["recording_summary"].short_title
 
-def analyze_interval(org_id: int, recording_id: int, interval_frames: List[Tuple[str, np.ndarray]]):
+def summarize_recording(
+    org_id: int, recording_id: int, recording_intervals_summary: str
+):
+    graph = RecordingSummarizerGraph()
+    summary_response = graph.summarize_recording(
+        org_id, recording_id, recording_intervals_summary
+    )
+    return (
+        summary_response["recording_summary"].summary,
+        summary_response["recording_summary"].short_title,
+    )
+
+
+def analyze_interval(
+    org_id: int, recording_id: int, interval_frames: List[Tuple[str, np.ndarray]]
+):
     graph = RecordingAnalyzerGraph()
     resized_frames = [
-        (t, resize_frame(f, height=FRAME_HEIGHT))
-        for t, f in interval_frames
+        (t, resize_frame(f, height=FRAME_HEIGHT)) for t, f in interval_frames
     ]
     interval_response = graph.analyze_recording(org_id, recording_id, resized_frames)
-    recording_intervals_analysis = interval_response[
-                    "recording_analysis"
-                ].intervals
+    recording_intervals_analysis = interval_response["recording_analysis"].intervals
 
     recording_interval_summary = interval_response["recording_analysis"].summary
 
     recording_intervals = []
 
-    categories = [interval_analysis.category for interval_analysis in recording_intervals_analysis]
+    categories = [
+        interval_analysis.category for interval_analysis in recording_intervals_analysis
+    ]
 
     for recording_interval_analysis in recording_intervals_analysis:
-    # Convert each TimestampDescription to JSON and then serialize the list
+        # Convert each TimestampDescription to JSON and then serialize the list
         timestamp_descriptions_json = json.dumps(
-            [
-                td.json()
-                for td in recording_interval_analysis.timestamp_descriptions
-            ]
+            [td.json() for td in recording_interval_analysis.timestamp_descriptions]
         )
 
         recording_interval = RecordingInterval(
@@ -246,8 +275,9 @@ def process_tags(categories: List[str]) -> str:
 
     if len(tags) == 0:
         return ""
-    
+
     return ", ".join(tags)
+
 
 @post_analysis_process()
 def analyze_recording(
@@ -265,7 +295,9 @@ def analyze_recording(
                 f"{org_id}/recordings/{recording.file_name}"
             )
 
-            timestamped_frames = extract_all_frames(local_recording_path, FRAMES_PER_SECOND)
+            timestamped_frames = extract_all_frames(
+                local_recording_path, FRAMES_PER_SECOND
+            )
             print(f"Extracted {len(timestamped_frames)} frames from video")
 
             if recording.file_duration is None:
@@ -275,10 +307,12 @@ def analyze_recording(
             recording_intervals_summary = ""
             categories = []
             for i in range(0, len(timestamped_frames), INTERVAL_DURATION):
-                interval_frames = timestamped_frames[i:i + INTERVAL_DURATION]
+                interval_frames = timestamped_frames[i : i + INTERVAL_DURATION]
                 timestamps = [t for t, _ in interval_frames]
                 print(f"Processing interval {timestamps}")
-                recording_intervals, recording_interval_summary, categories = analyze_interval(org_id, recording_id, interval_frames)
+                recording_intervals, recording_interval_summary, categories = (
+                    analyze_interval(org_id, recording_id, interval_frames)
+                )
                 recording_interval_summary = f"Interval {timestamps[0]} - {timestamps[-1]} summary: {recording_interval_summary}"
                 recording_intervals_summary += "\n" + recording_interval_summary
                 categories.extend(categories)
@@ -299,10 +333,12 @@ def analyze_recording(
                 )
 
         logger.info(f"Summarizing recording {recording_id}")
-        recording_summary, recording_short_title = summarize_recording(org_id, recording_id, recording_intervals_summary)
+        recording_summary, recording_short_title = summarize_recording(
+            org_id, recording_id, recording_intervals_summary
+        )
         logger.info(f"Recording summary: {recording_summary}")
         logger.info(f"Recording short title: {recording_short_title}")
-        
+
         # Update final recording state
         recording.summary = recording_summary
         recording.short_title = recording_short_title
@@ -311,12 +347,14 @@ def analyze_recording(
         recording.analysis_progress = 100
         recording.tags = process_tags(categories)
         repository.update(recording)
-        
+
         logger.info(f"Analysis completed for recording {recording_id}")
         return
 
     except Exception as e:
-        logger.error("Error analyzing recording", recording_id=recording_id, error=str(e))
+        logger.error(
+            "Error analyzing recording", recording_id=recording_id, error=str(e)
+        )
         # Get a fresh instance for error handling
         recording = repository.get_by_id(recording_id, org_id)
         if recording:
