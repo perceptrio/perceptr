@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Float
 from datetime import datetime, UTC
 from .base import Base
 from common.enums import AnalysisStatus
@@ -9,6 +9,7 @@ class Recording(Base):
     file_name = Column(String(250), nullable=False)
     file_size = Column(Integer, nullable=False)
     file_type = Column(String(50), nullable=False)
+    file_duration = Column(Float, nullable=True)  # Duration in seconds
     analysis_status = Column(String(50), nullable=False, default=AnalysisStatus.PENDING.value)
     analysis_error = Column(Text, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(UTC))

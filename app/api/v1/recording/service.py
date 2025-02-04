@@ -10,7 +10,7 @@ from common.enums import RecordingType, VideoType
 from .repository import RecordingRepository
 from graphs.recording_analyzer_graph import RecordingAnalyzerGraph
 from graphs.recording_summarizer_graph import RecordingSummarizerGraph
-from utils.recording import resize_frame, extract_all_frames
+from utils.recording import resize_frame, extract_all_frames, get_recording_duration
 from models.recording_interval import RecordingInterval
 from api.v1.recording_intervals import service as recording_intervals_service
 import json
@@ -265,8 +265,11 @@ def analyze_recording(
                 f"{org_id}/recordings/{recording.file_name}"
             )
 
-            timestamped_frames = extract_all_frames(local_recording_path, FRAMES_PER_SECOND)[:40]
+            timestamped_frames = extract_all_frames(local_recording_path, FRAMES_PER_SECOND)
             print(f"Extracted {len(timestamped_frames)} frames from video")
+
+            if recording.file_duration is None:
+                recording.file_duration = get_recording_duration(local_recording_path)
 
             analyzed_intervals = []
             recording_intervals_summary = ""
@@ -313,7 +316,7 @@ def analyze_recording(
         return
 
     except Exception as e:
-        logger.error(f"Error analyzing recording {recording_id}: {e}")
+        logger.error("Error analyzing recording", recording_id=recording_id, error=str(e))
         # Get a fresh instance for error handling
         recording = repository.get_by_id(recording_id, org_id)
         if recording:
