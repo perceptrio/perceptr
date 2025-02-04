@@ -68,7 +68,7 @@ def get_recording_upload_url(
     org_id: int,
     db: Session,
     recording_upload_url: RecordingUploadUrl,
-) -> str:
+) -> Tuple[str, str]:
     """
     Generate a presigned URL for uploading a recording.
 
@@ -88,9 +88,15 @@ def get_recording_upload_url(
     validate_recording_type(recording_upload_url.recording_type)
 
     # Generate S3 path and URL
-    file_path = f"{org_id}/recordings/{recording_name}/{recording_upload_url.recording_type.value}{convert_video_type_to_extension(recording_upload_url.content_type)}"
-    return s3_service.get_upload_url(
-        file_path, recording_upload_url.content_type, recording_upload_url.expiration
+    key = f"{recording_name}/{recording_upload_url.recording_type.value}{convert_video_type_to_extension(recording_upload_url.content_type)}"
+    file_path = f"{org_id}/recordings/{key}"
+    return (
+        s3_service.get_upload_url(
+            file_path,
+            recording_upload_url.content_type,
+            recording_upload_url.expiration,
+        ),
+        key,
     )
 
 

@@ -16,7 +16,7 @@ from common.middleware import GetPayload
 from sqlalchemy.orm import Session
 from database import get_db
 from typing import List
-from .schema import RecordingCreate
+from .schema import RecordingCreate, DeleteFileBody
 from fastapi import status
 from common.services.s3 import s3_service
 
@@ -30,13 +30,13 @@ def get_recording_upload_url(
     payload: Annotated[TokenPayload, Depends(GetPayload(type="access"))],
     db: Session = Depends(get_db),
 ):
-    url = service.get_recording_upload_url(
+    url, key = service.get_recording_upload_url(
         recording_name,
         payload.org.id,
         db,
         recording_upload_url,
     )
-    return RecordingUploadUrlResponse(url=url)
+    return RecordingUploadUrlResponse(url=url, key=key)
 
 
 @router.post("/{key}/download", response_model=RecordingDownloadUrlResponse)
@@ -88,12 +88,13 @@ def get_recordings_for_org(
     return [recording.convert_model_to_schema() for recording in recordings]
 
 
-@router.delete("/file/{key}", status_code=status.HTTP_204_NO_CONTENT)
+@router.post("/file/delete", status_code=status.HTTP_204_NO_CONTENT)
 def delete_file(
-    key: str,
+    body: DeleteFileBody,
     payload: Annotated[TokenPayload, Depends(GetPayload(type="access"))],
 ):
-    s3_service.delete_file(f"{payload.org.id}/recordings/{key}")
+    print(f"{payload.org.id}/recordings/{body.key}")
+    s3_service.delete_file(f"{payload.org.id}/recordings/{body.key}")
     return
 
 

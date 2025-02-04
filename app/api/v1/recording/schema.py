@@ -10,6 +10,7 @@ class RecordingUploadUrl(BaseModel):
 
 class RecordingUploadUrlResponse(BaseModel):
     url: str
+    key: str
 
 
 class RecordingDownloadUrl(BaseModel):
@@ -31,3 +32,7 @@ class RecordingAnalysis(BaseModel):
     user_id: int
     recording_id: int
     recording_path: str
+
+
+class DeleteFileBody(BaseModel):
+    key: str
