@@ -23,7 +23,7 @@ class RecordingDownloadUrlResponse(BaseModel):
 
 
 class RecordingCreate(BaseModel):
-    file_name: str  # folder name of file (excluding the extension)
+    file_name: str  # key of file in s3
     file_size: int
     file_type: VideoType
 

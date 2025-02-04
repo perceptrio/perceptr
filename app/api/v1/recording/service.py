@@ -181,7 +181,7 @@ def hard_delete_recording(db: Session, recording_id: int, org_id: int) -> None:
     recording = repository.get_by_id(recording_id, org_id)
     if not recording:
         raise HTTPException(status_code=404, detail="Recording not found")
-    s3_service.delete_folder(f"{org_id}/recordings/{recording.file_name}")
+    s3_service.delete_folder(f"{org_id}/recordings/{recording.file_name.split('/')[0]}")
     repository.delete(recording)
 
 
