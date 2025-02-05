@@ -5,24 +5,6 @@ from .base import Base
 from common.enums import AnalysisStatus, VideoType
 
 
-class PydanticRecording(BaseModel):
-    id: int
-    file_name: str
-    file_size: int
-    file_type: VideoType
-    file_duration: float | None
-    org_id: int
-    created_at: datetime
-    updated_at: datetime
-    deleted_at: datetime | None
-    analysis_status: AnalysisStatus
-    analysis_error: str | None
-    analysis_progress: int
-    short_title: str | None
-    summary: str | None
-    tags: str | None
-
-
 class Recording(Base):
     __tablename__ = "recording"
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -50,22 +32,3 @@ class Recording(Base):
 
     def get_analysis_status(self) -> AnalysisStatus:
         return AnalysisStatus(self.analysis_status)
-
-    def convert_model_to_schema(self) -> PydanticRecording:
-        return PydanticRecording(
-            id=self.id,
-            file_name=self.file_name,
-            file_size=self.file_size,
-            file_type=self.file_type,
-            file_duration=self.file_duration,
-            org_id=self.org_id,
-            created_at=self.created_at,
-            updated_at=self.updated_at,
-            deleted_at=self.deleted_at,
-            analysis_status=self.analysis_status,
-            analysis_error=self.analysis_error,
-            analysis_progress=self.analysis_progress,
-            short_title=self.short_title,
-            summary=self.summary,
-            tags=self.tags,
-        )

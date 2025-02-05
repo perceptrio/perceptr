@@ -1,5 +1,6 @@
+from datetime import datetime
 from pydantic import BaseModel
-from common.enums import RecordingType, VideoType
+from common.enums import RecordingType, VideoType, AnalysisStatus
 
 
 class RecordingUploadUrl(BaseModel):
@@ -36,3 +37,21 @@ class RecordingAnalysis(BaseModel):
 
 class DeleteFileBody(BaseModel):
     key: str
+
+
+class RecordingResponse(RecordingCreate):
+    id: int
+    file_duration: float | None
+    org_id: int
+    created_at: datetime
+    updated_at: datetime
+    deleted_at: datetime | None
+    analysis_status: AnalysisStatus
+    analysis_error: str | None
+    analysis_progress: int
+    short_title: str | None
+    summary: str | None
+    tags: str | None
+
+    class Config:
+        from_attributes = True

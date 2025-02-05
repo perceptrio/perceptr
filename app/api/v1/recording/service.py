@@ -255,9 +255,9 @@ def analyze_interval(
 
     for recording_interval_analysis in recording_intervals_analysis:
         # Convert each TimestampDescription to JSON and then serialize the list
-        timestamp_descriptions_json = json.dumps(
-            [td.json() for td in recording_interval_analysis.timestamp_descriptions]
-        )
+        timestamp_descriptions_json = [
+            td.model_dump() for td in recording_interval_analysis.timestamp_descriptions
+        ]
 
         recording_interval = RecordingInterval(
             recording_id=recording_id,

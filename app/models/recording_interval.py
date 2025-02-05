@@ -3,6 +3,8 @@ from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Time
 from sqlalchemy.types import JSON
 from .base import Base
 from common.enums import IntervalCategory
+import json
+from api.v1.recording_intervals.schema import RecordingIntervalResponse
 
 
 class RecordingInterval(Base):
@@ -18,7 +20,12 @@ class RecordingInterval(Base):
     short_title = Column(String, nullable=False)
     timestamp_descriptions = Column(JSON, nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
-    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), nullable=False)
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        nullable=False,
+    )
     deleted_at = Column(DateTime, nullable=True)
 
     def set_category(self, category: IntervalCategory):
