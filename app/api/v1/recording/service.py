@@ -10,6 +10,7 @@ from common.enums import RecordingType, VideoType
 from .repository import RecordingRepository
 from graphs.recording_analyzer_graph import RecordingAnalyzerGraph
 from graphs.recording_summarizer_graph import RecordingSummarizerGraph
+from graphs.issues_summarizer_graph import IssuesSummarizerGraph
 from utils.recording import resize_frame, extract_all_frames, get_recording_duration
 from models.recording_interval import RecordingInterval
 from api.v1.recording_intervals import service as recording_intervals_service
@@ -18,8 +19,10 @@ from common.enums import AnalysisStatus
 from typing import List, Tuple
 import numpy as np
 from datetime import datetime
-
-
+from api.v1.issue.repository import IssueRepository
+from api.v1.issue_recording.repository import IssueRecordingRepository
+from models.issue import Issue
+from models.issue_recording import IssueRecording
 def convert_model_to_schema(recording: Recording) -> Recording:
     return Recording(
         id=recording.id,
@@ -285,6 +288,68 @@ def process_tags(categories: List[str]) -> str:
     return ", ".join(tags)
 
 
+def recording_has_issues(analyzed_intervals: List[RecordingInterval]) -> bool:
+    for interval in analyzed_intervals:
+        if interval.category != "NORMAL":
+            return True
+    return False
+
+def process_issues(db: Session, org_id: int, recording_id: int, analyzed_intervals: List[RecordingInterval]):
+    issue_repository = IssueRepository(db)
+    issue_recording_repository = IssueRecordingRepository(db)
+    issues_summarizer_graph = IssuesSummarizerGraph()
+
+    issues = issue_repository.get_all(org_id)
+    existing_issues = []
+    for issue in issues:
+        existing_issues.append({
+            "issue_id": issue.id,
+            "issue_description": issue.description,
+            "issue_recommendation": issue.recommendation,
+            "issue_severity": issue.severity,
+            "issue_category": issue.category,
+        })
+
+    analyzed_recording_issues = []
+    for interval in analyzed_intervals:
+        if interval.category == "NORMAL":
+            continue
+
+        analyzed_recording_issues.append({
+            "recording_interval_id": interval.id,
+            "issue": interval.issue,
+            "category": interval.category,
+        })
+
+    response = issues_summarizer_graph.aggregate_issues(org_id, recording_id, analyzed_recording_issues, existing_issues)
+
+    for aggregated_issue in response["aggregated_issues"].issues:
+        if aggregated_issue.is_new_issue:
+            issue = issue_repository.create(Issue(
+                org_id=org_id,
+                title=aggregated_issue.issue.issue_title,
+                description=aggregated_issue.issue.issue_description,
+                recommendation=aggregated_issue.issue.issue_recommendation,
+                severity=aggregated_issue.issue.issue_severity,
+                category=aggregated_issue.issue.issue_category,
+            ))
+
+            issue_recording_repository.create(IssueRecording(
+                org_id=org_id,
+                issue_id=issue.id,
+                recording_id=recording_id,
+                recording_interval_id=aggregated_issue.recording_interval_id,
+            ))
+        else:
+            
+            issue_recording_repository.create(IssueRecording(
+                org_id=org_id,
+                issue_id=aggregated_issue.issue.issue_id,
+                recording_id=recording_id,
+                recording_interval_id=aggregated_issue.recording_interval_id,
+            ))
+
+
 @post_analysis_process()
 def analyze_recording(
     db: Session, org_id: int, recording_id: int, recording: Recording
@@ -344,6 +409,13 @@ def analyze_recording(
         )
         logger.info(f"Recording summary: {recording_summary}")
         logger.info(f"Recording short title: {recording_short_title}")
+        
+        if recording_has_issues(analyzed_intervals):
+            logger.info(f"Processing issues for recording {recording_id}")
+            process_issues(db, org_id, recording_id, analyzed_intervals)
+            logger.info(f"Issues processed for recording {recording_id}")
+        else:
+            logger.info(f"No issues found for recording {recording_id}")
 
         # Update final recording state
         recording.summary = recording_summary
