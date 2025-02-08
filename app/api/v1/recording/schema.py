@@ -1,5 +1,5 @@
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from common.enums import RecordingType, VideoType, AnalysisStatus
 
 
@@ -51,7 +51,14 @@ class RecordingResponse(RecordingCreate):
     analysis_progress: int
     short_title: str | None
     summary: str | None
-    tags: str | None
+    tags: list[str] | None
 
     class Config:
         from_attributes = True
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def split_tags(cls, value: str | None) -> list[str] | None:
+        if value is None:
+            return None
+        return [tag.strip() for tag in value.split(",") if tag.strip()]
