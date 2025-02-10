@@ -15,7 +15,7 @@ class RecordingUploadUrlResponse(BaseModel):
 
 
 class RecordingDownloadUrl(BaseModel):
-    recording_type: RecordingType = RecordingType.ORIGINAL
+    key: str
     expiration: int = 3600
 
 

@@ -104,7 +104,7 @@ def get_recording_upload_url(
 
 
 def get_recording_download_url(
-    key: str, org_id: int, db: Session, recording_download_url: RecordingDownloadUrl
+    org_id: int, db: Session, recording_download_url: RecordingDownloadUrl
 ) -> str:
     """
     Generate a presigned URL for downloading a recording.
@@ -119,11 +119,8 @@ def get_recording_download_url(
     # Verify org exists
     service.get_org(db, org_id)
 
-    # Validate recording type
-    validate_recording_type(recording_download_url.recording_type)
-
     # Generate S3 path and URL
-    file_path = f"{org_id}/recordings/{key}"
+    file_path = f"{org_id}/recordings/{recording_download_url.key}"
     return s3_service.get_download_url(file_path, recording_download_url.expiration)
 
 

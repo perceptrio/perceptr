@@ -38,15 +38,15 @@ def get_recording_upload_url(
     return RecordingUploadUrlResponse(url=url, key=key)
 
 
-@router.post("/{key}/download", response_model=RecordingDownloadUrlResponse)
+@router.post("/download", response_model=RecordingDownloadUrlResponse)
 def get_recording_download_url(
-    key: str,
     recording_download_url: RecordingDownloadUrl,
     payload: Annotated[TokenPayload, Depends(GetPayload(type="access"))],
     db: Session = Depends(get_db),
 ):
+    print("key", recording_download_url.key)
     url = service.get_recording_download_url(
-        key, payload.org.id, db, recording_download_url
+         payload.org.id, db, recording_download_url
     )
     return RecordingDownloadUrlResponse(url=url)
 
