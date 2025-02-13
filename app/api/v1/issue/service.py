@@ -1,7 +1,13 @@
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from models.issue import Issue
-from .schema import IssueCreate, IssueUpdate, IssueResponse, RecordingIntervalInfo, IssueWithIntervalsResponse
+from .schema import (
+    IssueCreate,
+    IssueUpdate,
+    IssueResponse,
+    RecordingIntervalInfo,
+    IssueWithIntervalsResponse,
+)
 from .repository import IssueRepository
 from api.v1.org import service as org_service
 from common.enums import IntervalCategory
@@ -28,26 +34,32 @@ def create_issue(db: Session, org_id: int, issue_data: IssueCreate) -> Issue:
     return issue
 
 
-def get_issue(db: Session, issue_id: int, org_id: int, include_intervals: bool = False) -> Issue | IssueWithIntervalsResponse:
+def get_issue(
+    db: Session, issue_id: int, org_id: int, include_intervals: bool = False
+) -> Issue | IssueWithIntervalsResponse:
     repository = IssueRepository(db)
     issue = repository.get_by_id(issue_id, org_id)
     if not issue:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Issue not found"
         )
-    
+
     if not include_intervals:
         return issue
-    
+
     # Get recording intervals for this issue
     intervals_data = repository.get_recording_intervals_for_issue(org_id, issue_id)
     recording_intervals = []
-    
+
     for recording, interval, _ in intervals_data:
         recording_intervals.append(
             RecordingIntervalInfo(
+                recording_file_size=recording.file_size,
+                recording_duration=recording.file_duration,
+                recording_created_at=recording.created_at,
                 recording_id=recording.id,
                 recording_title=recording.short_title,
+                recording_summary=recording.summary,
                 interval_id=interval.id,
                 start_time=interval.start_time,
                 end_time=interval.end_time,
@@ -55,10 +67,11 @@ def get_issue(db: Session, issue_id: int, org_id: int, include_intervals: bool =
                 category=IntervalCategory(interval.category),
             )
         )
-    
+
     return IssueWithIntervalsResponse(
         **issue.__dict__,
-        recording_intervals=recording_intervals
+        recording_intervals=recording_intervals,
+        recording_count=len(recording_intervals),
     )
 
 
@@ -72,18 +85,23 @@ def get_issues(
     category: IntervalCategory = None,
     start_date: datetime = None,
     end_date: datetime = None,
-) -> list[Issue]:
+) -> list[IssueResponse]:
     repository = IssueRepository(db)
-    return repository.get_all(
-        org_id, 
-        skip, 
-        limit, 
-        search, 
+    issues_with_counts = repository.get_all(
+        org_id,
+        skip,
+        limit,
+        search,
         is_resolved,
         category.value if category else None,
         start_date,
         end_date,
     )
+
+    return [
+        IssueResponse(**issue[0].__dict__, recording_count=issue[1])
+        for issue in issues_with_counts
+    ]
 
 
 def get_issues_by_recording(
@@ -106,7 +124,9 @@ def get_issues_by_recording(
     )
 
 
-def update_issue(db: Session, issue_id: int, org_id: int, issue_data: IssueUpdate) -> Issue:
+def update_issue(
+    db: Session, issue_id: int, org_id: int, issue_data: IssueUpdate
+) -> Issue:
     repository = IssueRepository(db)
     issue = repository.get_by_id(issue_id, org_id)
     if not issue:
@@ -116,7 +136,7 @@ def update_issue(db: Session, issue_id: int, org_id: int, issue_data: IssueUpdat
 
     # Update only provided fields
     for field, value in issue_data.model_dump(exclude_unset=True).items():
-        if field == 'category' and value is not None:
+        if field == "category" and value is not None:
             value = value.value
         setattr(issue, field, value)
 
@@ -136,4 +156,4 @@ def hard_delete_issue(db: Session, issue_id: int, org_id: int) -> None:
     issue = repository.get_by_id(issue_id, org_id)
     if not issue:
         raise HTTPException(status_code=404, detail="Issue not found")
-    repository.delete(issue) 
+    repository.delete(issue)

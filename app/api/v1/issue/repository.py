@@ -4,7 +4,7 @@ from models.issue import Issue
 from models.issue_recording import IssueRecording
 from models.recording import Recording
 from models.recording_interval import RecordingInterval
-from sqlalchemy import and_
+from sqlalchemy import and_, func
 
 
 class IssueRepository:
@@ -35,29 +35,36 @@ class IssueRepository:
         start_date: datetime = None,
         end_date: datetime = None,
     ) -> list[Issue]:
-        query = self.db.query(Issue).filter(
-            Issue.org_id == org_id,
-            Issue.deleted_at == None,
+        query = (
+            self.db.query(
+                Issue, func.count(IssueRecording.recording_id).label("recording_count")
+            )
+            .outerjoin(IssueRecording, Issue.id == IssueRecording.issue_id)
+            .filter(
+                Issue.org_id == org_id,
+                Issue.deleted_at == None,
+            )
+            .group_by(Issue.id)
         )
-        
+
         if is_resolved is not None:
             query = query.filter(Issue.is_resolved == is_resolved)
-            
+
         if search:
+            search = f"%{search}%"
             query = query.filter(
-                (Issue.title.ilike(f"%{search}%"))
-                | (Issue.description.ilike(f"%{search}%"))
+                Issue.title.ilike(search) | Issue.description.ilike(search)
             )
-            
+
         if category:
             query = query.filter(Issue.category == category)
 
         if start_date:
             query = query.filter(Issue.created_at >= start_date)
-            
+
         if end_date:
             query = query.filter(Issue.created_at <= end_date)
-            
+
         return query.offset(skip).limit(limit).all()
 
     def get_issues_by_recording(
@@ -104,7 +111,10 @@ class IssueRepository:
                 IssueRecording,
             )
             .join(IssueRecording, IssueRecording.recording_id == Recording.id)
-            .join(RecordingInterval, RecordingInterval.id == IssueRecording.recording_interval_id)
+            .join(
+                RecordingInterval,
+                RecordingInterval.id == IssueRecording.recording_interval_id,
+            )
             .filter(
                 and_(
                     Recording.org_id == org_id,
@@ -130,4 +140,4 @@ class IssueRepository:
 
     def delete(self, issue: Issue) -> None:
         self.db.delete(issue)
-        self.db.commit() 
+        self.db.commit()

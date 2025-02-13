@@ -1,28 +1,37 @@
 from datetime import datetime, time
 from pydantic import BaseModel
 from common.enums import IntervalCategory
+from typing import Optional
 
 
-class IssueCreate(BaseModel):
+class IssueBase(BaseModel):
     title: str
-    description: str | None = None
-    recommendation: str | None = None
+    description: Optional[str] = None
+    recommendation: Optional[str] = None
     severity: str
     category: IntervalCategory = IntervalCategory.NORMAL
 
 
+class IssueCreate(IssueBase):
+    pass
+
+
 class IssueUpdate(BaseModel):
-    title: str | None = None
-    description: str | None = None
-    recommendation: str | None = None
-    severity: str | None = None
-    category: IntervalCategory | None = None
-    is_resolved: bool | None = None
+    title: Optional[str] = None
+    description: Optional[str] = None
+    recommendation: Optional[str] = None
+    severity: Optional[str] = None
+    category: Optional[IntervalCategory] = None
+    is_resolved: Optional[bool] = None
 
 
 class RecordingIntervalInfo(BaseModel):
     recording_id: int
+    recording_file_size: int
+    recording_duration: float
+    recording_created_at: datetime
     recording_title: str | None
+    recording_summary: str | None
     interval_id: int
     start_time: time
     end_time: time
@@ -33,7 +42,7 @@ class RecordingIntervalInfo(BaseModel):
         from_attributes = True
 
 
-class IssueResponse(BaseModel):
+class IssueResponse(IssueBase):
     id: int
     org_id: int
     title: str
@@ -44,6 +53,7 @@ class IssueResponse(BaseModel):
     is_resolved: bool
     created_at: datetime
     updated_at: datetime
+    recording_count: int = 0
 
     class Config:
         from_attributes = True

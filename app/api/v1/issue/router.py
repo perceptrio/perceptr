@@ -48,11 +48,11 @@ def get_issues_for_org(
     end_date: datetime = None,
 ):
     issues = service.get_issues(
-        db, 
-        payload.org.id, 
-        skip, 
-        limit, 
-        search, 
+        db,
+        payload.org.id,
+        skip,
+        limit,
+        search,
         is_resolved,
         category,
         start_date,
@@ -111,4 +111,4 @@ def hard_delete_issue(
     db: Session = Depends(get_db),
 ):
     service.hard_delete_issue(db, issue_id, payload.org.id)
-    return 
+    return
