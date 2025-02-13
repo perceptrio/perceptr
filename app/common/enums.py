@@ -21,8 +21,6 @@ class VideoType(str, Enum):
 class IntervalCategory(Enum):
     NORMAL = "NORMAL"
     BUG = "BUG"
-    USEABILITY_ISSUE = "USEABILITY_ISSUE"
-    # TODO: remove this
     USABILITY_ISSUE = "USABILITY_ISSUE"
     PERFORMANCE_ISSUE = "PERFORMANCE_ISSUE"
     ENHANCEMENT = "ENHANCEMENT"
