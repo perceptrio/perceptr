@@ -32,6 +32,7 @@ class RecordingIntervalRepository:
                 RecordingInterval.recording_id == recording_id,
                 RecordingInterval.deleted_at == None,
             )
+            .order_by(RecordingInterval.start_time)
             .all()
         )
 

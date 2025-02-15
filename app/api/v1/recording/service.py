@@ -292,13 +292,15 @@ def recording_has_issues(analyzed_intervals: List[RecordingInterval]) -> bool:
     return False
 
 def process_issues(db: Session, org_id: int, recording_id: int, analyzed_intervals: List[RecordingInterval]):
+
     issue_repository = IssueRepository(db)
     issue_recording_repository = IssueRecordingRepository(db)
     issues_summarizer_graph = IssuesSummarizerGraph()
 
     issues = issue_repository.get_all(org_id)
     existing_issues = []
-    for issue in issues:
+    for issue_tuple in issues:
+        issue = issue_tuple[0]  # Get the Issue object from the tuple
         existing_issues.append({
             "issue_id": issue.id,
             "issue_description": issue.description,
@@ -306,7 +308,6 @@ def process_issues(db: Session, org_id: int, recording_id: int, analyzed_interva
             "issue_severity": issue.severity,
             "issue_category": issue.category,
         })
-
     analyzed_recording_issues = []
     for interval in analyzed_intervals:
         if interval.category == "NORMAL":
@@ -317,7 +318,6 @@ def process_issues(db: Session, org_id: int, recording_id: int, analyzed_interva
             "issue": interval.issue,
             "category": interval.category,
         })
-
     response = issues_summarizer_graph.aggregate_issues(org_id, recording_id, analyzed_recording_issues, existing_issues)
 
     for aggregated_issue in response["aggregated_issues"].issues:
@@ -366,7 +366,7 @@ def analyze_recording(
             timestamped_frames = extract_all_frames(
                 local_recording_path, FRAMES_PER_SECOND
             )
-            print(f"Extracted {len(timestamped_frames)} frames from video")
+            logger.info(f"Extracted {len(timestamped_frames)} frames from video")
 
             if recording.file_duration is None:
                 recording.file_duration = get_recording_duration(local_recording_path)
@@ -377,7 +377,7 @@ def analyze_recording(
             for i in range(0, len(timestamped_frames), INTERVAL_DURATION):
                 interval_frames = timestamped_frames[i : i + INTERVAL_DURATION]
                 timestamps = [t for t, _ in interval_frames]
-                print(f"Processing interval {timestamps}")
+                logger.info(f"Processing interval {timestamps}")
                 recording_intervals, recording_interval_summary, categories = (
                     analyze_interval(org_id, recording_id, interval_frames)
                 )
