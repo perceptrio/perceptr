@@ -79,7 +79,8 @@ class IssuesSummarizerGraph:
 
         Your task is to analyze the issues in the recording and determine if any of them are new or if they have been reported before.
 
-        To determine if an issue has been reported before, you should check if the issue description and category match any of the issues in the past.
+        To determine if an issue has been reported before, you should check if the issue description is semantically similar to any of the issues in the past.
+        Even if the issue description is not exactly the same, if the issue is related to the same problem, you should consider it as a duplicate.
 
         If the issue has been reported before, you should return the issue id.
         If the issue has not been reported before, you should return a new issue object.
