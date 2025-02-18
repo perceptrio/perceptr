@@ -1,9 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from api.v1.org import router as org_router
-from api.v1.recording import router as recording_router
-from api.v1.recording_intervals import router as recording_interval_router
-from api.v1.issue import router as issue_router
+from api.v1.org.router import router as org_router
+from api.v1.recording.router import router as recording_router
+from api.v1.recording_intervals.router import router as recording_interval_router
+from api.v1.issue.router import router as issue_router
+from api.v1.analytics.router import router as analytics_router
 
 app = FastAPI()
 
@@ -19,10 +20,11 @@ app.add_middleware(
 )
 
 # Include routers
-app.include_router(org_router.router)
-app.include_router(recording_router.router)
-app.include_router(recording_interval_router.router)
-app.include_router(issue_router.router)
+app.include_router(org_router)
+app.include_router(recording_router)
+app.include_router(recording_interval_router)
+app.include_router(issue_router)
+app.include_router(analytics_router)
 
 
 @app.get("/")
