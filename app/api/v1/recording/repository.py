@@ -42,7 +42,7 @@ class RecordingRepository:
             query = query.filter(Recording.created_at >= start_date)
         if end_date:
             query = query.filter(Recording.created_at <= end_date)
-        return query.offset(skip).limit(limit).all()
+        return query.order_by(Recording.created_at.desc()).offset(skip).limit(limit).all()
 
     def update(self, recording: Recording) -> Recording:
         self.db.commit()

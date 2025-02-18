@@ -249,10 +249,6 @@ def analyze_interval(
 
     recording_intervals = []
 
-    categories = [
-        interval_analysis.category for interval_analysis in recording_intervals_analysis
-    ]
-
     for recording_interval_analysis in recording_intervals_analysis:
         # Convert each TimestampDescription to JSON and then serialize the list
         timestamp_descriptions_json = [
@@ -272,7 +268,7 @@ def analyze_interval(
 
         recording_intervals.append(recording_interval)
 
-    return recording_intervals, recording_interval_summary, categories
+    return recording_intervals, recording_interval_summary
 
 
 def process_tags(categories: List[str]) -> str:
@@ -353,6 +349,8 @@ def analyze_recording(
 ) -> dict:
     try:
         repository = RecordingRepository(db)
+        issue_repository = IssueRepository(db)
+
         # Get a fresh instance of the recording that's attached to the current session
         recording = repository.get_by_id(recording_id, org_id)
         if not recording:
@@ -373,20 +371,23 @@ def analyze_recording(
 
             analyzed_intervals = []
             recording_intervals_summary = ""
-            categories = []
-            for i in range(0, len(timestamped_frames), INTERVAL_DURATION):
+            total_intervals = len(range(0, len(timestamped_frames), INTERVAL_DURATION))
+            
+            for idx, i in enumerate(range(0, len(timestamped_frames), INTERVAL_DURATION)):
                 interval_frames = timestamped_frames[i : i + INTERVAL_DURATION]
                 timestamps = [t for t, _ in interval_frames]
                 logger.info(f"Processing interval {timestamps}")
-                recording_intervals, recording_interval_summary, categories = (
-                    analyze_interval(org_id, recording_id, interval_frames)
+                recording_intervals, recording_interval_summary = analyze_interval(
+                    org_id, recording_id, interval_frames
                 )
                 recording_interval_summary = f"Interval {timestamps[0]} - {timestamps[-1]} summary: {recording_interval_summary}"
                 recording_intervals_summary += "\n" + recording_interval_summary
-                categories.extend(categories)
-                # Update recording progress
-                recording.analysis_progress = i / len(timestamped_frames) * 100
+
+                # Update interval analysis progress
+                progress = min(round((idx + 1) / total_intervals * 100, 2), 99.99)
+                recording.analysis_progress = progress
                 repository.update(recording)
+                
                 analyzed_intervals.extend(recording_intervals)
 
             if recording_intervals_service.check_recording_intervals_with_recording_id(
@@ -410,6 +411,9 @@ def analyze_recording(
         if recording_has_issues(analyzed_intervals):
             logger.info(f"Processing issues for recording {recording_id}")
             process_issues(db, org_id, recording_id, analyzed_intervals)
+            issues = issue_repository.get_issues_by_recording(org_id, recording_id)
+            categories = [issue.category for issue in issues]
+            recording.tags = process_tags(categories)
             logger.info(f"Issues processed for recording {recording_id}")
         else:
             logger.info(f"No issues found for recording {recording_id}")
@@ -420,7 +424,6 @@ def analyze_recording(
         recording.set_analysis_status(AnalysisStatus.COMPLETED)
         recording.analysis_error = None
         recording.analysis_progress = 100
-        recording.tags = process_tags(categories)
         repository.update(recording)
 
         logger.info(f"Analysis completed for recording {recording_id}")
