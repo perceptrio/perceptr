@@ -30,6 +30,9 @@ class TimestampDescription(BaseModel):
     description: str = Field(
         description="A detailed description of the user's actions, and what's happening on the screen."
     )
+    ui_design_feedback: Optional[str] = Field(
+        description="Observations and recommendations focused solely on the UI elements and overall visual design of the screenshot. Assess aspects such as layout, alignment, color contrast, typography, spacing, and responsiveness. Note any areas where the design could be optimized, improved, or clarified. If no visual feedback is required, leave this field empty. No need for positive feedback, only feedback on what could be improved."
+    )
     timestamp: str = Field(
         description="The timestamp in the recording. Format: HH:MM:SS"
     )
@@ -53,11 +56,11 @@ class TimestampInterval(BaseModel):
     description: str = Field(
         description="A detailed description of the user's actions in the interval."
     )
-    category: str = Field(
-        description="The category of the interval. Can be one of: NORMAL, BUG, USABILITY_ISSUE, PERFORMANCE_ISSUE, ENHANCEMENT"
-    )
     issue: Optional[str] = Field(
         description="The issue found in the interval. If there is no issue, leave it empty."
+    )
+    category: str = Field(
+        description="The category of the interval. Can be one of: NORMAL, BUG, USABILITY_ISSUE, PERFORMANCE_ISSUE, ENHANCEMENT"
     )
     short_title: str = Field(description="A short title for the interval.")
     timestamp_descriptions: List[TimestampDescription] = Field(
@@ -155,43 +158,80 @@ class RecordingAnalyzerGraph:
     ):
 
         # Create the prompt.
-        prompt = """You are an expert UI/UX Researcher analyzing a user session.
-        You are given a list of timestamps along with an image of the user's screen at each timestamp.
+        prompt = """
+You are an expert UI/UX Researcher analyzing a user session. You are given a list of timestamps along with an image of the user's screen at each timestamp. Your task is to analyze the recording and provide a detailed, grouped, timestamped analysis of the user's actions, behavior, and any UI issues observed. **Group consecutive timestamps that represent similar or related actions into a single interval.** Each interval should capture a single action or a set of related actions.
 
-        Your task is to analyze the recording and provide a detailed analysis of the user's actions, behavior, and emotional state, by extracting timestamped intervals.
-
-        Each interval should be a single action or a set of actions that are related to each other.
-
-        The intervals should be grouped into categories based on the user's actions.
-
-        The categories are:
-
-        NORMAL: The user is performing their normal actions.
-
-        BUG: Issues that significantly impact functionality and need immediate resolution.
-
-        USABILITY_ISSUE: Problems that hinder user experience but don't necessarily break functionality.
-
-        PERFORMANCE_ISSUE: Concerns related to speed, load times, or responsiveness.
-
-        ENHANCEMENT: Suggestions for improvements or new features that could enhance user experience.
-        
-
-        If any issue is found, it takes priority over the NORMAL category.
+**For each interval, include:**
+- **Start Time:** The first timestamp in the group.
+- **End Time:** The last timestamp in the group.
+- **Detailed Description:** A clear description of the user's actions and observations during the interval.
+- **Issue:** If an issue is detected, provide a detailed description of the issue. If no issue is detected, leave it empty.
+- **Category:** Classify the interval as one of the following:
+  - **BUG:** Issues that significantly impact functionality and need immediate resolution.
+  - **USABILITY_ISSUE:** Problems that hinder user experience but do not completely break functionality.
+  - **PERFORMANCE_ISSUE:** Concerns related to speed, load times, or responsiveness. Only mark as performance issue if the loading time is more than 3 seconds.
+  - **ENHANCEMENT:** Suggestions for improvements or new features to enhance the user experience.
+  - **NORMAL:** Routine user actions without any apparent issues. 
+  *Note: If any issue is detected, it should override the NORMAL categorization.*
+- **Short Title:** A short title for the interval.
+- **Timestamp Descriptions:** A list of timestamp descriptions for every timestamp included in the interval. Contains the following fields:
+    - **Description:** A detailed description of the user's actions and observations during the interval.
+    - **UI Design Feedback:** Observations and recommendations focused solely on the UI elements and overall visual design of the screenshot. Assess aspects such as layout, alignment, color contrast, typography, spacing, and responsiveness. Note any areas where the design could be optimized, improved, or clarified. If no visual feedback is required, leave this field empty. No need for positive feedback, only feedback on what could be improved.
+    - **Timestamp:** The timestamp in the recording. Format: HH:MM:SS
 
 
-        For each timestamp in the recording, provide a detailed analysis of the user's actions, behavior, and emotional state.
-        
-         Focus on:
-                    1. Signs of user frustration (rapid movements, rage clicks)
-                    2. Navigation patterns and hesitation points
-                    3. Areas where the user seems confused or stuck
-                    4. Interaction with specific UI elements
-                    5. Bugs and issues
-                    6. Errors and issues
-                    7. UI/UX issues
+**Focus Areas:**
+1. **User Behavior & Interaction:**
+   - Identify signs of user frustration (e.g., rapid or repeated clicks, hesitations, or abrupt movements).
+   - Examine navigation patterns, particularly moments of hesitation or repeated attempts.
+   - Highlight any moments where the user appears confused or stuck.
 
-        DON'T MISS ANY TIMESTAMP.
+2. **Interaction with UI Elements:**
+   - Assess how users interact with buttons, menus, forms, and other interactive elements.
+   - Detect if UI elements (e.g., buttons, links, icons) are unresponsive, misplaced, or unclear.
+   - Note if tooltips, modals, or error messages appear and whether they aid or confuse the user.
+
+3. **Layout & Visual Design:**
+   - Evaluate the consistency of the layout, including alignment, spacing, and visual hierarchy.
+   - Look for issues with readability, such as poor contrast between text and background.
+   - Identify visual clutter, overlapping elements, or design elements that might cause confusion.
+
+4. **Accessibility:**
+   - Check if UI elements are accessible (e.g., adequate size for click/tap, keyboard navigation support).
+   - Assess whether error messages and labels are clear and assistive.
+   - Note any potential barriers for users with visual or motor impairments.
+
+5. **Performance & Responsiveness:**
+   - Observe any lag, slow load times, or sudden reflows of the UI.
+   - Identify any elements that are unresponsive or cause delays in the user’s workflow.
+
+6. **Error Handling & Feedback:**
+   - Document any bugs or errors that occur and how the UI communicates them.
+   - Note if error messages or feedback mechanisms are helpful and clear.
+
+7. **Opportunities for Enhancement:**
+   - Suggest improvements for usability and overall design.
+   - Recommend new features or refinements that could streamline user interactions.
+   - Provide actionable insights to improve the user experience (e.g., “Increase button size for better touch targets,” “Improve color contrast for readability”).
+
+**Instructions:**
+
+- **Grouping:**  
+  - **Group consecutive timestamps** that reflect a single action or a set of related actions into one interval.
+  - If a timestamp clearly represents a distinct action not related to its neighbors, it should start a new interval.
+  
+- **Comprehensiveness:**  
+  - Ensure that every provided timestamp is included in the analysis either as its own interval or as part of a grouped interval.
+  - Provide both macro-level (overall session behavior) and micro-level (detailed UI element interactions) insights.
+
+- **Clarity:**  
+  - Use clear, concise language. Reference specific timestamps, UI elements, and user behaviors.
+  
+- **Actionable Insights:**  
+  - Provide concrete recommendations for each identified issue, prioritizing bugs and usability issues over normal interactions.
+
+- **Final Check:**  
+  - Before finalizing your analysis, verify that every provided timestamp is included in the output and appropriately grouped into intervals based on similarity of actions.
         
                     """
 
