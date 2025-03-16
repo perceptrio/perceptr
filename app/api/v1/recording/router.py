@@ -15,7 +15,7 @@ from common.middleware import GetPayload
 from sqlalchemy.orm import Session
 from database import get_db
 from typing import List
-from .schema import RecordingCreate, DeleteFileBody
+from .schema import RecordingCreateForUpload, DeleteFileBody
 from fastapi import status
 from common.services.s3 import s3_service
 
@@ -53,11 +53,11 @@ def get_recording_download_url(
 
 @router.post("/", response_model=RecordingResponse)
 def create_recording(
-    recording: RecordingCreate,
+    recording: RecordingCreateForUpload,
     payload: Annotated[TokenPayload, Depends(GetPayload(type="access"))],
     db: Session = Depends(get_db),
 ):
-    recording = service.create_recording(db, payload.org.id, recording)
+    recording = service.create_recording_for_upload(db, payload.org.id, recording)
     return recording
 
 

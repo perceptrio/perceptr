@@ -1,7 +1,12 @@
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from models.recording import Recording
-from .schema import RecordingUploadUrl, RecordingDownloadUrl, RecordingCreate
+from .schema import (
+    RecordingCreate,
+    RecordingUploadUrl,
+    RecordingDownloadUrl,
+    RecordingCreateForUpload,
+)
 from common.services.s3 import s3_service
 from common.services.files_downloader import FilesDownloader
 from common.services.logger import logger
@@ -14,7 +19,6 @@ from graphs.issues_summarizer_graph import IssuesSummarizerGraph
 from utils.recording import resize_frame, extract_all_frames, get_recording_duration
 from models.recording_interval import RecordingInterval
 from api.v1.recording_intervals import service as recording_intervals_service
-import json
 from common.enums import AnalysisStatus
 from typing import List, Tuple
 import numpy as np
@@ -23,6 +27,8 @@ from api.v1.issue.repository import IssueRepository
 from api.v1.issue_recording.repository import IssueRecordingRepository
 from models.issue import Issue
 from models.issue_recording import IssueRecording
+
+
 def convert_model_to_schema(recording: Recording) -> Recording:
     return Recording(
         id=recording.id,
@@ -64,6 +70,11 @@ def validate_recording_exists_in_s3(key: str, org_id: int) -> None:
 
 def convert_video_type_to_extension(video_type: VideoType) -> str:
     return "." + video_type.split("/")[1]
+
+
+def get_recording_by_session_id(session_id: str, org_id: int, db: Session) -> Recording:
+    repository = RecordingRepository(db)
+    return repository.get_recording_by_session_id(session_id, org_id)
 
 
 def get_recording_upload_url(
@@ -124,8 +135,40 @@ def get_recording_download_url(
     return s3_service.get_download_url(file_path, recording_download_url.expiration)
 
 
-def create_recording(db: Session, org_id: int, recording: RecordingCreate) -> Recording:
+def create_recording(db: Session, recording: RecordingCreate) -> Recording:
     """Create a new recording"""
+    repository = RecordingRepository(db)
+    recording = repository.create(
+        Recording(
+            file_name=recording.file_name,
+            file_size=recording.file_size,
+            file_type=recording.file_type,
+            file_duration=recording.file_duration,
+            org_id=recording.org_id,
+            client_id=recording.client_id,
+            client_data=recording.client_data,
+            meta_data=recording.meta_data,
+            analysis_status=recording.analysis_status,
+            session_id=recording.session_id,
+            short_title=recording.short_title,
+            summary=recording.summary,
+            tags=recording.tags,
+        )
+    )
+    return recording
+
+
+def update_recording(db: Session, recording: Recording) -> Recording:
+    """Update a recording"""
+    repository = RecordingRepository(db)
+    recording = repository.update(recording)
+    return recording
+
+
+def create_recording_for_upload(
+    db: Session, org_id: int, recording: RecordingCreateForUpload
+) -> Recording:
+    """Create a new recording for upload"""
     # Verify org exists
     service.get_org(db, org_id)
 
@@ -287,7 +330,13 @@ def recording_has_issues(analyzed_intervals: List[RecordingInterval]) -> bool:
             return True
     return False
 
-def process_issues(db: Session, org_id: int, recording_id: int, analyzed_intervals: List[RecordingInterval]):
+
+def process_issues(
+    db: Session,
+    org_id: int,
+    recording_id: int,
+    analyzed_intervals: List[RecordingInterval],
+):
 
     issue_repository = IssueRepository(db)
     issue_recording_repository = IssueRecordingRepository(db)
@@ -297,50 +346,62 @@ def process_issues(db: Session, org_id: int, recording_id: int, analyzed_interva
     existing_issues = []
     for issue_tuple in issues:
         issue = issue_tuple[0]  # Get the Issue object from the tuple
-        existing_issues.append({
-            "issue_id": issue.id,
-            "issue_description": issue.description,
-            "issue_recommendation": issue.recommendation,
-            "issue_severity": issue.severity,
-            "issue_category": issue.category,
-        })
+        existing_issues.append(
+            {
+                "issue_id": issue.id,
+                "issue_description": issue.description,
+                "issue_recommendation": issue.recommendation,
+                "issue_severity": issue.severity,
+                "issue_category": issue.category,
+            }
+        )
     analyzed_recording_issues = []
     for interval in analyzed_intervals:
         if interval.category == "NORMAL":
             continue
 
-        analyzed_recording_issues.append({
-            "recording_interval_id": interval.id,
-            "issue": interval.issue,
-            "category": interval.category,
-        })
-    response = issues_summarizer_graph.aggregate_issues(org_id, recording_id, analyzed_recording_issues, existing_issues)
+        analyzed_recording_issues.append(
+            {
+                "recording_interval_id": interval.id,
+                "issue": interval.issue,
+                "category": interval.category,
+            }
+        )
+    response = issues_summarizer_graph.aggregate_issues(
+        org_id, recording_id, analyzed_recording_issues, existing_issues
+    )
 
     for aggregated_issue in response["aggregated_issues"].issues:
         if aggregated_issue.is_new_issue:
-            issue = issue_repository.create(Issue(
-                org_id=org_id,
-                title=aggregated_issue.issue.issue_title,
-                description=aggregated_issue.issue.issue_description,
-                recommendation=aggregated_issue.issue.issue_recommendation,
-                severity=aggregated_issue.issue.issue_severity,
-                category=aggregated_issue.issue.issue_category,
-            ))
+            issue = issue_repository.create(
+                Issue(
+                    org_id=org_id,
+                    title=aggregated_issue.issue.issue_title,
+                    description=aggregated_issue.issue.issue_description,
+                    recommendation=aggregated_issue.issue.issue_recommendation,
+                    severity=aggregated_issue.issue.issue_severity,
+                    category=aggregated_issue.issue.issue_category,
+                )
+            )
 
-            issue_recording_repository.create(IssueRecording(
-                org_id=org_id,
-                issue_id=issue.id,
-                recording_id=recording_id,
-                recording_interval_id=aggregated_issue.recording_interval_id,
-            ))
+            issue_recording_repository.create(
+                IssueRecording(
+                    org_id=org_id,
+                    issue_id=issue.id,
+                    recording_id=recording_id,
+                    recording_interval_id=aggregated_issue.recording_interval_id,
+                )
+            )
         else:
-            
-            issue_recording_repository.create(IssueRecording(
-                org_id=org_id,
-                issue_id=aggregated_issue.issue.issue_id,
-                recording_id=recording_id,
-                recording_interval_id=aggregated_issue.recording_interval_id,
-            ))
+
+            issue_recording_repository.create(
+                IssueRecording(
+                    org_id=org_id,
+                    issue_id=aggregated_issue.issue.issue_id,
+                    recording_id=recording_id,
+                    recording_interval_id=aggregated_issue.recording_interval_id,
+                )
+            )
 
 
 @post_analysis_process()
@@ -372,8 +433,10 @@ def analyze_recording(
             analyzed_intervals = []
             recording_intervals_summary = ""
             total_intervals = len(range(0, len(timestamped_frames), INTERVAL_DURATION))
-            
-            for idx, i in enumerate(range(0, len(timestamped_frames), INTERVAL_DURATION)):
+
+            for idx, i in enumerate(
+                range(0, len(timestamped_frames), INTERVAL_DURATION)
+            ):
                 interval_frames = timestamped_frames[i : i + INTERVAL_DURATION]
                 timestamps = [t for t, _ in interval_frames]
                 logger.info(f"Processing interval {timestamps}")
@@ -387,7 +450,7 @@ def analyze_recording(
                 progress = min(round((idx + 1) / total_intervals * 100, 2), 99.99)
                 recording.analysis_progress = progress
                 repository.update(recording)
-                
+
                 analyzed_intervals.extend(recording_intervals)
 
             if recording_intervals_service.check_recording_intervals_with_recording_id(
@@ -407,7 +470,7 @@ def analyze_recording(
         )
         logger.info(f"Recording summary: {recording_summary}")
         logger.info(f"Recording short title: {recording_short_title}")
-        
+
         if recording_has_issues(analyzed_intervals):
             logger.info(f"Processing issues for recording {recording_id}")
             process_issues(db, org_id, recording_id, analyzed_intervals)

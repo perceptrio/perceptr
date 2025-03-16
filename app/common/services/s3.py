@@ -102,6 +102,22 @@ class S3Service:
                 detail="could not delete file",
             )
 
+    def download_file(self, file_path: str) -> bytes:
+        """Download a file from S3."""
+        try:
+            response = self.s3_client.get_object(Bucket=self.bucket_name, Key=file_path)
+            return response["Body"].read()
+        except ClientError as e:
+            logger.error(f"Error downloading file: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="could not download file",
+            )
+
+    def upload_file(self, file_path: str, content: bytes) -> None:
+        """Upload a file to S3."""
+        self.s3_client.put_object(Bucket=self.bucket_name, Key=file_path, Body=content)
+
     def list_folder_contents(
         self, folder_path: str, recursive: bool = True
     ) -> list[dict]:

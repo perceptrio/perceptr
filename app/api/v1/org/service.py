@@ -31,6 +31,10 @@ def get_org(db: Session, org_id: int) -> Org:
         )
     return org
 
+def get_org_by_project_id(db: Session, project_id: str) -> Org:
+    repository = OrgRepository(db)
+    return repository.get_org_by_project_id(project_id)
+
 def get_orgs(db: Session, skip: int = 0, limit: int = 100) -> list[Org]:
     repository = OrgRepository(db)
     return repository.get_all(skip, limit)

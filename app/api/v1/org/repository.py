@@ -11,6 +11,9 @@ class OrgRepository:
         self.db.refresh(org)
         return org
 
+    def get_org_by_project_id(self, project_id: str) -> Org:
+        return self.db.query(Org).filter(Org.project_id == project_id).first()
+    
     def get_by_id(self, org_id: int) -> Org | None:
         return self.db.query(Org).filter(Org.id == org_id).first()
 
