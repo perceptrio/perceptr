@@ -3,6 +3,7 @@ from enum import Enum
 
 class RecordingType(str, Enum):
     ORIGINAL = "original"
+    EVENTS = "events"
     ONE_FRAME_PER_SECOND = "one_frame_per_second"
 
 
@@ -28,5 +29,12 @@ class IntervalCategory(Enum):
 
 class AnalysisStatus(str, Enum):
     PENDING = "pending"
+    IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     FAILED = "failed"
+
+class RecordingSessionType(str, Enum):
+    RRWEB = "rrweb"
+    UPLOADED = "uploaded"
+    POSTHOG = "posthog"
+    SENTRY = "sentry"

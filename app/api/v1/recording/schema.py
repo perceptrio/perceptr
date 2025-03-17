@@ -24,6 +24,21 @@ class RecordingDownloadUrlResponse(BaseModel):
 
 
 class RecordingCreate(BaseModel):
+    org_id: int
+    file_name: str | None = None
+    file_size: int | None = None
+    file_type: str | None = None
+    file_duration: float | None = None
+    analysis_status: str = AnalysisStatus.PENDING.value
+    short_title: str | None = None
+    summary: str | None = None
+    tags: str | None = None
+    session_id: str | None = None
+    client_id: str | None = None
+    client_data: dict | None = None
+    meta_data: dict | None = None
+
+class RecordingCreateForUpload(BaseModel):
     file_name: str  # key of file in s3
     file_size: int
     file_type: VideoType
@@ -39,7 +54,7 @@ class DeleteFileBody(BaseModel):
     key: str
 
 
-class RecordingResponse(RecordingCreate):
+class RecordingResponse(RecordingCreateForUpload):
     id: int
     file_duration: float | None
     org_id: int

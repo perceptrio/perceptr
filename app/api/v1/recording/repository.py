@@ -42,7 +42,20 @@ class RecordingRepository:
             query = query.filter(Recording.created_at >= start_date)
         if end_date:
             query = query.filter(Recording.created_at <= end_date)
-        return query.order_by(Recording.created_at.desc()).offset(skip).limit(limit).all()
+        return (
+            query.order_by(Recording.created_at.desc()).offset(skip).limit(limit).all()
+        )
+
+    def get_recording_by_session_id(self, session_id: str, org_id: int) -> Recording:
+        return (
+            self.db.query(Recording)
+            .filter(
+                Recording.session_id == session_id,
+                Recording.org_id == org_id,
+                Recording.deleted_at == None,
+            )
+            .first()
+        )
 
     def update(self, recording: Recording) -> Recording:
         self.db.commit()
