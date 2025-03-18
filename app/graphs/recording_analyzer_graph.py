@@ -203,7 +203,7 @@ You are an expert UI/UX Researcher analyzing a user session. You are given a lis
 
 5. **Performance & Responsiveness:**
    - Observe any lag, slow load times, or sudden reflows of the UI.
-   - Identify any elements that are unresponsive or cause delays in the user’s workflow.
+   - Identify any elements that are unresponsive or cause delays in the user's workflow.
 
 6. **Error Handling & Feedback:**
    - Document any bugs or errors that occur and how the UI communicates them.
@@ -212,7 +212,7 @@ You are an expert UI/UX Researcher analyzing a user session. You are given a lis
 7. **Opportunities for Enhancement:**
    - Suggest improvements for usability and overall design.
    - Recommend new features or refinements that could streamline user interactions.
-   - Provide actionable insights to improve the user experience (e.g., “Increase button size for better touch targets,” “Improve color contrast for readability”).
+   - Provide actionable insights to improve the user experience (e.g., "Increase button size for better touch targets," "Improve color contrast for readability").
 
 **Instructions:**
 
@@ -325,5 +325,5 @@ You are an expert UI/UX Researcher analyzing a user session. You are given a lis
             )
             return resp
         except Exception as e:
-            logger.error("Error creating graph with response", {"error": str(e)})
+            logger.error(f"Error creating graph with response: {str(e)}")
             raise e

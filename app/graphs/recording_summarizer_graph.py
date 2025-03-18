@@ -1,4 +1,3 @@
-
 from typing_extensions import TypedDict
 from langgraph.graph import StateGraph, START, END
 from langchain_openai import ChatOpenAI
@@ -88,7 +87,7 @@ class RecordingSummarizerGraph():
             )
             return resp
         except Exception as e:
-            logger.error("Error creating graph with response", {"error": str(e)})
+            logger.error(f"Error creating graph with response: {str(e)}")
             raise e
 
 

@@ -14,7 +14,7 @@ os.environ["LANGFUSE_PUBLIC_KEY"] = settings.LANGFUSE_PUBLIC_KEY
 os.environ["LANGFUSE_SECRET_KEY"] = settings.LANGFUSE_PRIVATE_KEY
 os.environ["LANGFUSE_HOST"] = settings.LANGFUSE_HOST
 from pydantic import BaseModel, Field
-
+from typing import Optional
 
 class NewIssue(BaseModel):
     issue_title: str = Field(description="The title of the issue.")
@@ -31,7 +31,9 @@ class NewIssue(BaseModel):
 
 
 class ExistingIssue(BaseModel):
-    issue_id: int = Field(description="The id of the issue.")
+    is_previous_recording_interval_issue: bool = Field(description="Whether the issue is seen previously in this recording.")
+    issue_id: Optional[int] = Field(description="The id of the issue. If the issue is not seen previously in this recording, it should be None.")
+    previous_recording_interval_id: Optional[int] = Field(description="The id of the recording interval that the issue belongs to. If the issue is not seen previously in this recording, it should be None.")
 
 
 class Issue(BaseModel):
@@ -83,6 +85,7 @@ class IssuesSummarizerGraph:
         Even if the issue description is not exactly the same, if the issue is related to the same problem, you should consider it as a duplicate.
 
         If the issue has been reported before, you should return the issue id.
+        If the issue is priviously reported in this recording, you should return the recording interval id of the previous recording interval and set is_previous_recording_interval_issue to True.
         If the issue has not been reported before, you should return a new issue object.
 
         The issue object should contain the following fields:
@@ -143,5 +146,5 @@ class IssuesSummarizerGraph:
             )
             return resp
         except Exception as e:
-            logger.error("Error creating graph with response", {"error": str(e)})
+            logger.error(f"Error creating graph with response: {str(e)}")
             raise e

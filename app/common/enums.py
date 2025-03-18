@@ -14,6 +14,7 @@ class VideoType(str, Enum):
     WEBM = "video/webm"
     MPEG = "video/mpeg"
     OGG = "video/ogg"
+    JSON = "application/json"
     # for testing purposes
     JPEG = "image/jpeg"
 
