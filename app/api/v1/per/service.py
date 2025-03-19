@@ -1,18 +1,19 @@
-from sqlalchemy.orm import Session
-from api.v1.recording.schema import RecordingCreate
-from models.org import Org
-from models.recording import Recording
-from .schema import SnapshotBuffer
-from common.services.s3 import s3_service
-from common.services.logger import logger
-import json
 import gzip
 import io
-from fastapi import BackgroundTasks
-from api.v1.recording import service as recording_service
-from common.enums import AnalysisStatus
+import json
+
 from api.v1.org import service as org_service
 from api.v1.recording import service as recording_service
+from api.v1.recording.schema import RecordingCreate
+from common.enums import AnalysisStatus, VideoType
+from common.services.logger import logger
+from common.services.s3 import s3_service
+from fastapi import BackgroundTasks
+from models.org import Org
+from models.recording import Recording
+from sqlalchemy.orm import Session
+
+from .schema import SnapshotBuffer
 
 
 def get_org_by_project_id(db: Session, project_id: str) -> Org:
@@ -61,7 +62,7 @@ def _get_or_create_recording(
             org_id=org_id,
             session_id=snapshot_buffer.sessionId,
             file_name=file_name,
-            file_type="application/gzip",
+            file_type=VideoType.GZIP.value,
             file_size=0,
             client_id=client_id,
             client_data=user_metadata,
@@ -107,6 +108,50 @@ def _update_recording_file(
     recording_service.update_recording(db, recording)
 
 
+def _process_events_background(
+    db: Session,
+    org_id: int,
+    recording_id: int,
+    snapshot_buffer: SnapshotBuffer,
+    background_tasks: BackgroundTasks,
+) -> None:
+    """Background task to process events and upload to S3"""
+    try:
+        # Get a fresh recording instance in this session
+        recording = recording_service.get_recording(db, recording_id, org_id)
+        if not recording:
+            logger.error(f"Recording {recording_id} not found in background task")
+            return
+
+        # Upload events to S3
+        s3_path = f"{org_id}/{snapshot_buffer.sessionId}/events.jsonl.gz"
+        json_line = json.dumps(snapshot_buffer.model_dump()) + "\n"
+        _update_recording_file(db, recording, s3_path, json_line)
+
+        # If session ended, schedule analysis
+        if snapshot_buffer.isSessionEnded:
+            recording.analysis_status = AnalysisStatus.IN_PROGRESS.value
+            recording = recording_service.update_recording(db, recording)
+            logger.info(
+                f"Session ended, analysis in progress: {snapshot_buffer.sessionId}"
+            )
+            # Schedule analysis as a nested background task
+            background_tasks.add_task(
+                schedule_session_analysis, db, org_id, snapshot_buffer.sessionId
+            )
+    except Exception as e:
+        logger.error(f"Error processing events in background: {str(e)}")
+        try:
+            # Get a fresh recording instance for error handling
+            recording = recording_service.get_recording(db, recording_id, org_id)
+            if recording:
+                recording.analysis_status = AnalysisStatus.FAILED.value
+                recording.analysis_error = str(e)
+                recording_service.update_recording(db, recording)
+        except Exception as inner_e:
+            logger.error(f"Error updating recording status: {str(inner_e)}")
+
+
 def process_events(
     db: Session,
     org_id: int,
@@ -115,30 +160,25 @@ def process_events(
 ) -> dict:
     """Process incoming event buffer from the SDK"""
 
-    # 1. Get or create recording
+    # 1. Get or create recording - this needs to be done synchronously
     recording, _ = _get_or_create_recording(db, org_id, snapshot_buffer)
     if recording.analysis_status != AnalysisStatus.PENDING.value:
         return {"success": True, "message": "Recording is not pending"}
 
-    # 2. Upload events to S3
-    s3_path = f"{org_id}/{snapshot_buffer.sessionId}/events.jsonl.gz"
-    json_line = json.dumps(snapshot_buffer.model_dump()) + "\n"
-    _update_recording_file(db, recording, s3_path, json_line)
+    # 2. Schedule the rest of the processing in background
+    background_tasks.add_task(
+        _process_events_background,
+        db,
+        org_id,
+        recording.id,
+        snapshot_buffer,
+        background_tasks,
+    )
 
-    # 3. Update recording status if session ended
-    if snapshot_buffer.isSessionEnded:
-        recording.analysis_status = AnalysisStatus.IN_PROGRESS.value
-        recording = recording_service.update_recording(db, recording)
-        logger.info(f"Session ended, analysis in progress: {snapshot_buffer.sessionId}")
-        # Schedule analysis
-        background_tasks.add_task(
-            schedule_session_analysis, db, org_id, snapshot_buffer.sessionId
-        )
-
-    return {"success": True, "message": "Events processed successfully"}
+    return {"success": True, "message": "Events scheduled for processing"}
 
 
-def schedule_session_analysis(db: Session, org_id: int, session_id: str):
+def schedule_session_analysis(db: Session, org_id: int, session_id: str) -> None:
     """Background task to trigger session analysis"""
     logger.info(f"TODO: Implement session analysis for {session_id}")
     # This would be implemented to call your analysis pipeline

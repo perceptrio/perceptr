@@ -15,6 +15,7 @@ class VideoType(str, Enum):
     WEBM = "video/webm"
     MPEG = "video/mpeg"
     OGG = "video/ogg"
+    GZIP = "application/gzip"
     # for testing purposes
     JPEG = "image/jpeg"
 
@@ -32,6 +33,7 @@ class AnalysisStatus(str, Enum):
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     FAILED = "failed"
+
 
 class RecordingSessionType(str, Enum):
     RRWEB = "rrweb"
