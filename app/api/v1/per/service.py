@@ -12,6 +12,7 @@ from common.services.s3 import s3_service
 from fastapi import BackgroundTasks
 from models.org import Org
 from models.recording import Recording
+from settings import settings
 from sqlalchemy.orm import Session
 from utils.rrweb import RRWebSessionUtils
 
@@ -227,29 +228,28 @@ def schedule_session_analysis(
         session = RRWebSessionUtils(json_path)
 
         # Print session summary
-        print(session.get_session_summary())
-        print(f"Start time: {session.get_start_time()}")
-        print(f"End time: {session.get_end_time()}")
-        print(f"Duration: {session.get_duration()}")
-        print(f"Events: {len(session.get_events())}")
-        print(f"User identity: {session.get_user_identity()}")
+        logger.info(session.get_session_summary())
+        logger.info(f"Start time: {session.get_start_time()}")
+        logger.info(f"End time: {session.get_end_time()}")
+        logger.info(f"Duration: {session.get_duration()}")
+        logger.info(f"Events: {len(session.get_events())}")
+        logger.info(f"User identity: {session.get_user_identity()}")
 
         # Convert to video
-        print("\nConverting session to video...")
+        logger.info("\nConverting session to video...")
         result = session.convert_events_to_video()
 
         if result["success"]:
-            print("\nVideo conversion successful!")
-            print(f"Video saved to: {result['output_path']}")
-        else:
-            print("\nVideo conversion failed!")
-            if "error" in result:
-                print(f"Error: {result['error']}")
+            logger.info(f"Video saved to: {result['output_path']}")
+            if settings.AI_ANALYSIS_ENABLED:
+                recording_service.analyze_local_recording(
+                    db, org_id, recording_id, recording, result["output_path"]
+                )
             else:
-                print(f"Message: {result['message']}")
-
-        # TODO: Implement actual analysis of events
-
-        # Update recording status after analysis
-        recording.analysis_status = AnalysisStatus.COMPLETED.value
-        recording_service.update_recording(db, recording)
+                logger.info("AI analysis is disabled, skipping analysis")
+        else:
+            logger.error("\nVideo conversion failed!")
+            if "error" in result:
+                logger.error(f"Error: {result['error']}")
+            else:
+                logger.error(f"Message: {result['message']}")
