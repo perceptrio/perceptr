@@ -1,32 +1,36 @@
-from fastapi import HTTPException, status
-from sqlalchemy.orm import Session
-from models.recording import Recording
-from .schema import (
-    RecordingCreate,
-    RecordingUploadUrl,
-    RecordingDownloadUrl,
-    RecordingCreateForUpload,
-)
-from common.services.s3 import s3_service
-from common.services.files_downloader import FilesDownloader
-from common.services.logger import logger
-from api.v1.org import service
-from common.enums import RecordingType, VideoType
-from .repository import RecordingRepository
-from graphs.recording_analyzer_graph import RecordingAnalyzerGraph
-from graphs.recording_summarizer_graph import RecordingSummarizerGraph
-from graphs.issues_summarizer_graph import IssuesSummarizerGraph
-from utils.recording import resize_frame, extract_all_frames, get_recording_duration
-from models.recording_interval import RecordingInterval
-from api.v1.recording_intervals import service as recording_intervals_service
-from common.enums import AnalysisStatus
-from typing import List, Tuple
-import numpy as np
 from datetime import datetime
+from typing import Any, Callable, List, Optional, Tuple, TypeVar, cast
+
+import numpy as np
 from api.v1.issue.repository import IssueRepository
 from api.v1.issue_recording.repository import IssueRecordingRepository
+from api.v1.org import service
+from api.v1.recording_intervals import service as recording_intervals_service
+from common.enums import AnalysisStatus, RecordingType, VideoType
+from common.services.files_downloader import FilesDownloader
+from common.services.logger import logger
+from common.services.s3 import s3_service
+from fastapi import HTTPException, status
+from graphs.issues_summarizer_graph import IssuesSummarizerGraph
+from graphs.recording_analyzer_graph import RecordingAnalyzerGraph
+from graphs.recording_summarizer_graph import RecordingSummarizerGraph
 from models.issue import Issue
 from models.issue_recording import IssueRecording
+from models.recording import Recording
+from models.recording_interval import RecordingInterval
+from sqlalchemy.orm import Session
+from utils.recording import extract_all_frames, get_recording_duration, resize_frame
+
+from .repository import RecordingRepository
+from .schema import (
+    RecordingCreate,
+    RecordingCreateForUpload,
+    RecordingDownloadUrl,
+    RecordingUploadUrl,
+)
+
+# Type variables for the decorator
+F = TypeVar("F", bound=Callable[..., Any])
 
 
 def convert_model_to_schema(recording: Recording) -> Recording:
@@ -49,7 +53,7 @@ def validate_video_type(content_type: VideoType) -> None:
     if content_type not in [t.value for t in VideoType]:
         logger.error(f"Invalid video type: {content_type}")
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid video type"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid video type"
         )
 
 
@@ -58,7 +62,7 @@ def validate_recording_type(recording_type: RecordingType) -> None:
     if recording_type not in [t.value for t in RecordingType]:
         logger.error(f"Invalid recording type: {recording_type}")
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid recording type"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid recording type"
         )
 
 
@@ -69,10 +73,13 @@ def validate_recording_exists_in_s3(key: str, org_id: int) -> None:
 
 
 def convert_video_type_to_extension(video_type: VideoType) -> str:
-    return "." + video_type.split("/")[1]
+    extension = video_type.split("/")[1]
+    return "." + extension  # type: ignore
 
 
-def get_recording_by_session_id(session_id: str, org_id: int, db: Session) -> Recording:
+def get_recording_by_session_id(
+    session_id: str, org_id: int, db: Session
+) -> Optional[Recording]:
     repository = RecordingRepository(db)
     return repository.get_recording_by_session_id(session_id, org_id)
 
@@ -102,16 +109,16 @@ def get_recording_upload_url(
     validate_recording_type(recording_upload_url.recording_type)
 
     # Generate S3 path and URL
-    key = f"{recording_name}/{recording_upload_url.recording_type.value}{convert_video_type_to_extension(recording_upload_url.content_type)}"
+    extension = convert_video_type_to_extension(recording_upload_url.content_type)
+    rec_type = recording_upload_url.recording_type.value
+    key = f"{recording_name}/{rec_type}{extension}"
     file_path = f"{org_id}/recordings/{key}"
-    return (
-        s3_service.get_upload_url(
-            file_path,
-            recording_upload_url.content_type,
-            recording_upload_url.expiration,
-        ),
-        key,
+    upload_url = s3_service.get_upload_url(
+        file_path,
+        recording_upload_url.content_type,
+        recording_upload_url.expiration,
     )
+    return (upload_url, key)
 
 
 def get_recording_download_url(
@@ -132,13 +139,16 @@ def get_recording_download_url(
 
     # Generate S3 path and URL
     file_path = f"{org_id}/recordings/{recording_download_url.key}"
-    return s3_service.get_download_url(file_path, recording_download_url.expiration)
+    download_url = s3_service.get_download_url(
+        file_path, recording_download_url.expiration
+    )
+    return download_url  # type: ignore
 
 
 def create_recording(db: Session, recording: RecordingCreate) -> Recording:
     """Create a new recording"""
     repository = RecordingRepository(db)
-    recording = repository.create(
+    recording_model = repository.create(
         Recording(
             file_name=recording.file_name,
             file_size=recording.file_size,
@@ -155,7 +165,7 @@ def create_recording(db: Session, recording: RecordingCreate) -> Recording:
             tags=recording.tags,
         )
     )
-    return recording
+    return recording_model
 
 
 def update_recording(db: Session, recording: Recording) -> Recording:
@@ -177,7 +187,7 @@ def create_recording_for_upload(
 
     # Create recording
     repository = RecordingRepository(db)
-    recording = repository.create(
+    recording_model = repository.create(
         Recording(
             file_name=recording.file_name,
             file_size=recording.file_size,
@@ -185,7 +195,7 @@ def create_recording_for_upload(
             org_id=org_id,
         )
     )
-    return recording
+    return recording_model
 
 
 def get_recording(db: Session, recording_id: int, org_id: int) -> Recording:
@@ -203,12 +213,13 @@ def get_recordings(
     org_id: int,
     skip: int = 0,
     limit: int = 100,
-    search: str = None,
-    start_date: datetime = None,
-    end_date: datetime = None,
-) -> list[Recording]:
+    search: Optional[str] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+) -> List[Recording]:
     repository = RecordingRepository(db)
-    return repository.get_all(org_id, skip, limit, search, start_date, end_date)
+    recordings = repository.get_all(org_id, skip, limit, search, start_date, end_date)
+    return recordings
 
 
 def soft_delete_recording(db: Session, recording_id: int, org_id: int) -> None:
@@ -230,7 +241,7 @@ def hard_delete_recording(db: Session, recording_id: int, org_id: int) -> None:
 
 def check_recording_belonging_to_org(
     db: Session, recording_id: int, org_id: int
-) -> None:
+) -> Recording:
     repository = RecordingRepository(db)
     recording = repository.get_by_id(recording_id, org_id)
     if not recording:
@@ -241,21 +252,21 @@ def check_recording_belonging_to_org(
     return recording
 
 
-def post_analysis_process(callback=None):
-    def decorator(func):
+def post_analysis_process(callback: Optional[Callable] = None) -> Callable[[F], F]:
+    def decorator(func: F) -> F:
         def wrapper(
             db: Session,
             org_id: int,
             recording_id: int,
             recording: Recording,
-            *args,
-            **kwargs,
-        ):
+            *args: Any,
+            **kwargs: Any,
+        ) -> Any:
             result = func(db, org_id, recording_id, recording, *args, **kwargs)
             logger.info(f"Analysis Process Completed - Recording: {recording_id}")
             return result
 
-        return wrapper
+        return cast(F, wrapper)
 
     return decorator
 
@@ -267,7 +278,7 @@ INTERVAL_DURATION = 30
 
 def summarize_recording(
     org_id: int, recording_id: int, recording_intervals_summary: str
-):
+) -> Tuple[str, str]:
     graph = RecordingSummarizerGraph()
     summary_response = graph.summarize_recording(
         org_id, recording_id, recording_intervals_summary
@@ -279,12 +290,18 @@ def summarize_recording(
 
 
 def analyze_interval(
-    org_id: int, recording_id: int, interval_frames: List[Tuple[str, np.ndarray]]
-):
+    org_id: int,
+    recording_id: int,
+    interval_frames: List[Tuple[str, np.ndarray]],
+    should_resize_frame: bool = True,
+) -> Tuple[List[RecordingInterval], str]:
     graph = RecordingAnalyzerGraph()
-    resized_frames = [
-        (t, resize_frame(f, height=FRAME_HEIGHT)) for t, f in interval_frames
-    ]
+    if should_resize_frame:
+        resized_frames = [
+            (t, resize_frame(f, height=FRAME_HEIGHT)) for t, f in interval_frames
+        ]
+    else:
+        resized_frames = interval_frames
     interval_response = graph.analyze_recording(org_id, recording_id, resized_frames)
     recording_intervals_analysis = interval_response["recording_analysis"].intervals
 
@@ -336,8 +353,7 @@ def process_issues(
     org_id: int,
     recording_id: int,
     analyzed_intervals: List[RecordingInterval],
-):
-
+) -> None:
     issue_repository = IssueRepository(db)
     issue_recording_repository = IssueRecordingRepository(db)
     issues_summarizer_graph = IssuesSummarizerGraph()
@@ -393,7 +409,6 @@ def process_issues(
                 )
             )
         else:
-
             issue_recording_repository.create(
                 IssueRecording(
                     org_id=org_id,
@@ -407,7 +422,7 @@ def process_issues(
 @post_analysis_process()
 def analyze_recording(
     db: Session, org_id: int, recording_id: int, recording: Recording
-) -> dict:
+) -> None:
     try:
         repository = RecordingRepository(db)
         issue_repository = IssueRepository(db)
@@ -441,10 +456,13 @@ def analyze_recording(
                 timestamps = [t for t, _ in interval_frames]
                 logger.info(f"Processing interval {timestamps}")
                 recording_intervals, recording_interval_summary = analyze_interval(
-                    org_id, recording_id, interval_frames
+                    org_id, recording_id, interval_frames, should_resize_frame=True
                 )
-                recording_interval_summary = f"Interval {timestamps[0]} - {timestamps[-1]} summary: {recording_interval_summary}"
-                recording_intervals_summary += "\n" + recording_interval_summary
+                summary_text = (
+                    f"Interval {timestamps[0]} - {timestamps[-1]} summary: "
+                    f"{recording_interval_summary}"
+                )
+                recording_intervals_summary += "\n" + summary_text
 
                 # Update interval analysis progress
                 progress = min(round((idx + 1) / total_intervals * 100, 2), 99.99)
@@ -453,9 +471,12 @@ def analyze_recording(
 
                 analyzed_intervals.extend(recording_intervals)
 
-            if recording_intervals_service.check_recording_intervals_with_recording_id(
-                db, recording_id
-            ):
+            has_intervals = (
+                recording_intervals_service.check_recording_intervals_with_recording_id(
+                    db, recording_id
+                )
+            )
+            if has_intervals:
                 recording_intervals_service.replace_recording_intervals(
                     db, recording_id, analyzed_intervals
                 )
@@ -490,7 +511,7 @@ def analyze_recording(
         repository.update(recording)
 
         logger.info(f"Analysis completed for recording {recording_id}")
-        return
+        return None
 
     except Exception as e:
         logger.error(
@@ -502,4 +523,101 @@ def analyze_recording(
             recording.set_analysis_status(AnalysisStatus.FAILED)
             recording.analysis_error = str(e)
             repository.update(recording)
-        return
+        return None
+
+
+@post_analysis_process()
+def analyze_local_recording(
+    db: Session,
+    org_id: int,
+    recording_id: int,
+    recording: Recording,
+    local_recording_path: str,
+) -> None:
+    try:
+        repository = RecordingRepository(db)
+        issue_repository = IssueRepository(db)
+
+        timestamped_frames = extract_all_frames(local_recording_path, FRAMES_PER_SECOND)
+        logger.info(f"Extracted {len(timestamped_frames)} frames from video")
+
+        if recording.file_duration is None:
+            recording.file_duration = get_recording_duration(local_recording_path)
+
+        analyzed_intervals = []
+        recording_intervals_summary = ""
+        total_intervals = len(range(0, len(timestamped_frames), INTERVAL_DURATION))
+
+        for idx, i in enumerate(range(0, len(timestamped_frames), INTERVAL_DURATION)):
+            interval_frames = timestamped_frames[i : i + INTERVAL_DURATION]
+            timestamps = [t for t, _ in interval_frames]
+            logger.info(f"Processing interval {timestamps}")
+            recording_intervals, recording_interval_summary = analyze_interval(
+                org_id, recording_id, interval_frames, should_resize_frame=True
+            )
+            summary_text = (
+                f"Interval {timestamps[0]} - {timestamps[-1]} summary: "
+                f"{recording_interval_summary}"
+            )
+            recording_intervals_summary += "\n" + summary_text
+
+            # Update interval analysis progress
+            progress = min(round((idx + 1) / total_intervals * 100, 2), 99.99)
+            recording.analysis_progress = progress
+            repository.update(recording)
+
+            analyzed_intervals.extend(recording_intervals)
+
+        has_intervals = (
+            recording_intervals_service.check_recording_intervals_with_recording_id(
+                db, recording_id
+            )
+        )
+        if has_intervals:
+            recording_intervals_service.replace_recording_intervals(
+                db, recording_id, analyzed_intervals
+            )
+        else:
+            recording_intervals_service.batch_create_recording_intervals(
+                db, analyzed_intervals
+            )
+
+        logger.info(f"Summarizing recording {recording_id}")
+        recording_summary, recording_short_title = summarize_recording(
+            org_id, recording_id, recording_intervals_summary
+        )
+        logger.info(f"Recording summary: {recording_summary}")
+        logger.info(f"Recording short title: {recording_short_title}")
+
+        if recording_has_issues(analyzed_intervals):
+            logger.info(f"Processing issues for recording {recording_id}")
+            process_issues(db, org_id, recording_id, analyzed_intervals)
+            issues = issue_repository.get_issues_by_recording(org_id, recording_id)
+            categories = [issue.category for issue in issues]
+            recording.tags = process_tags(categories)
+            logger.info(f"Issues processed for recording {recording_id}")
+        else:
+            logger.info(f"No issues found for recording {recording_id}")
+
+        # Update final recording state
+        recording.summary = recording_summary
+        recording.short_title = recording_short_title
+        recording.set_analysis_status(AnalysisStatus.COMPLETED)
+        recording.analysis_error = None
+        recording.analysis_progress = 100
+        repository.update(recording)
+
+        logger.info(f"Analysis completed for recording {recording_id}")
+        return None
+
+    except Exception as e:
+        logger.error(
+            "Error analyzing recording", recording_id=recording_id, error=str(e)
+        )
+        # Get a fresh instance for error handling
+        recording = repository.get_by_id(recording_id, org_id)
+        if recording:
+            recording.set_analysis_status(AnalysisStatus.FAILED)
+            recording.analysis_error = str(e)
+            repository.update(recording)
+        return None

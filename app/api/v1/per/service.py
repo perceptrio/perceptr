@@ -6,12 +6,15 @@ from api.v1.org import service as org_service
 from api.v1.recording import service as recording_service
 from api.v1.recording.schema import RecordingCreate
 from common.enums import AnalysisStatus, VideoType
+from common.services.files_downloader import FilesDownloader
 from common.services.logger import logger
 from common.services.s3 import s3_service
 from fastapi import BackgroundTasks
 from models.org import Org
 from models.recording import Recording
+from settings import settings
 from sqlalchemy.orm import Session
+from utils.rrweb import RRWebSessionUtils
 
 from .schema import SnapshotBuffer
 
@@ -137,7 +140,11 @@ def _process_events_background(
             )
             # Schedule analysis as a nested background task
             background_tasks.add_task(
-                schedule_session_analysis, db, org_id, snapshot_buffer.sessionId
+                schedule_session_analysis,
+                db,
+                org_id,
+                recording_id,
+                snapshot_buffer.sessionId,
             )
     except Exception as e:
         logger.error(f"Error processing events in background: {str(e)}")
@@ -178,9 +185,71 @@ def process_events(
     return {"success": True, "message": "Events scheduled for processing"}
 
 
-def schedule_session_analysis(db: Session, org_id: int, session_id: str) -> None:
+def _decompress_and_save_json(content: bytes, output_path: str) -> str:
+    """Decompress gzipped content and save to a JSON file
+
+    Args:
+        content: Compressed gzip content
+        output_path: Path to save the JSON file
+
+    Returns:
+        Path to the saved JSON file
+    """
+    # Decompress content
+    decompressed_content = _decompress_gzip(content)
+
+    # Save raw decompressed content to file
+    with open(output_path, "wb") as f:
+        f.write(decompressed_content)
+
+    return output_path
+
+
+def schedule_session_analysis(
+    db: Session, org_id: int, recording_id: int, session_id: str
+) -> None:
     """Background task to trigger session analysis"""
     logger.info(f"TODO: Implement session analysis for {session_id}")
-    # This would be implemented to call your analysis pipeline
-    # For example:
-    # recording_service.analyze_recording(db, org_id, session_id, recording)
+    recording = recording_service.get_recording(db, recording_id, org_id)
+    s3_path = f"{org_id}/{session_id}/events.jsonl.gz"
+    with FilesDownloader(s3_service.get_s3_client()) as downloader:
+        local_file_path = downloader.download_file_from_s3(s3_path)
+
+        # Read the compressed file
+        with open(local_file_path, "rb") as file:
+            compressed_content = file.read()
+
+        # Decompress and save as JSON
+        json_path = local_file_path.replace(".jsonl.gz", ".json")
+        _decompress_and_save_json(compressed_content, json_path)
+
+        logger.info(f"Saved JSON events to {json_path}")
+
+        session = RRWebSessionUtils(json_path)
+
+        # Print session summary
+        logger.info(session.get_session_summary())
+        logger.info(f"Start time: {session.get_start_time()}")
+        logger.info(f"End time: {session.get_end_time()}")
+        logger.info(f"Duration: {session.get_duration()}")
+        logger.info(f"Events: {len(session.get_events())}")
+        logger.info(f"User identity: {session.get_user_identity()}")
+
+        # Convert to video
+        logger.info("\nConverting session to video...")
+        result = session.convert_events_to_video()
+
+        if result["success"]:
+            logger.info(f"Video saved to: {result['output_path']}")
+            if settings.AI_ANALYSIS_ENABLED:
+                recording_service.analyze_local_recording(
+                    db, org_id, recording_id, recording, result["output_path"]
+                )
+            else:
+                logger.info("AI analysis is disabled, skipping analysis")
+        else:
+            logger.error("\nVideo conversion failed!")
+            if "error" in result:
+                logger.error(f"Error: {result['error']}")
+            else:
+                logger.error(f"Message: {result['message']}")

@@ -1,6 +1,8 @@
 from datetime import datetime
-from sqlalchemy.orm import Session
+from typing import List, Optional
+
 from models.recording import Recording
+from sqlalchemy.orm import Session
 
 
 class RecordingRepository:
@@ -13,7 +15,7 @@ class RecordingRepository:
         self.db.refresh(recording)
         return recording
 
-    def get_by_id(self, recording_id: int, org_id: int) -> Recording | None:
+    def get_by_id(self, recording_id: int, org_id: int) -> Optional[Recording]:
         return (
             self.db.query(Recording)
             .filter(Recording.id == recording_id, Recording.org_id == org_id)
@@ -25,12 +27,12 @@ class RecordingRepository:
         org_id: int,
         skip: int = 0,
         limit: int = 100,
-        search: str = None,
-        start_date: datetime = None,
-        end_date: datetime = None,
-    ) -> list[Recording]:
+        search: Optional[str] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+    ) -> List[Recording]:
         query = self.db.query(Recording).filter(
-            Recording.org_id == org_id, Recording.deleted_at == None
+            Recording.org_id == org_id, Recording.deleted_at is None
         )
         if search:
             query = query.filter(
@@ -42,17 +44,21 @@ class RecordingRepository:
             query = query.filter(Recording.created_at >= start_date)
         if end_date:
             query = query.filter(Recording.created_at <= end_date)
-        return (
+
+        result = (
             query.order_by(Recording.created_at.desc()).offset(skip).limit(limit).all()
         )
+        return result  # type: ignore
 
-    def get_recording_by_session_id(self, session_id: str, org_id: int) -> Recording:
+    def get_recording_by_session_id(
+        self, session_id: str, org_id: int
+    ) -> Optional[Recording]:
         return (
             self.db.query(Recording)
             .filter(
                 Recording.session_id == session_id,
                 Recording.org_id == org_id,
-                Recording.deleted_at == None,
+                Recording.deleted_at is None,
             )
             .first()
         )
@@ -62,7 +68,7 @@ class RecordingRepository:
         self.db.refresh(recording)
         return recording
 
-    def soft_delete(self, recording: Recording) -> None:
+    def soft_delete(self, recording: Recording) -> Recording:
         recording.deleted_at = datetime.now()
         self.db.commit()
         self.db.refresh(recording)

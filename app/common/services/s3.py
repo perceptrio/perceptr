@@ -1,13 +1,14 @@
-from typing import Optional
+from typing import Optional, cast
+
 import boto3
 from botocore.exceptions import ClientError
-from fastapi import HTTPException, status
 from common.services.logger import logger
+from fastapi import HTTPException, status
 from settings import settings
 
 
 class S3Service:
-    def __init__(self):
+    def __init__(self) -> None:
         self.s3_client = boto3.client(
             "s3",
             aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
@@ -30,7 +31,7 @@ class S3Service:
             file_path: The path to the file in S3
             operation: S3 operation ('get_object', 'put_object', 'delete_object')
             expiration: URL expiration time in seconds (default: 1 hour)
-            extra_args: Additional arguments for the operation (e.g., ContentType for uploads)
+            extra_args: Additional arguments for the operation
         """
         try:
             params = {"Bucket": self.bucket_name, "Key": file_path}
@@ -40,12 +41,12 @@ class S3Service:
             url = self.s3_client.generate_presigned_url(
                 ClientMethod=operation, Params=params, ExpiresIn=expiration
             )
-            return url
+            return cast(str, url)
         except ClientError as e:
             logger.error(f"Error generating presigned URL: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"could not generate presigned URL",
+                detail="could not generate presigned URL",
             )
 
     def get_download_url(self, file_path: str, expiration: int = 3600) -> str:
@@ -106,7 +107,7 @@ class S3Service:
         """Download a file from S3."""
         try:
             response = self.s3_client.get_object(Bucket=self.bucket_name, Key=file_path)
-            return response["Body"].read()
+            return cast(bytes, response["Body"].read())
         except ClientError as e:
             logger.error(f"Error downloading file: {str(e)}")
             raise HTTPException(
@@ -163,7 +164,7 @@ class S3Service:
             logger.error(f"Error listing folder contents: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"could not list folder contents",
+                detail="could not list folder contents",
             )
 
     def delete_folder(self, folder_path: str) -> None:
@@ -186,7 +187,7 @@ class S3Service:
             logger.error(f"could not delete folder: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"could not delete folder",
+                detail="could not delete folder",
             )
 
     def get_s3_client(self) -> boto3.client:
