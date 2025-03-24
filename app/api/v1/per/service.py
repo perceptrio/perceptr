@@ -46,6 +46,9 @@ def _get_or_create_recording(
     Returns:
         tuple: (recording, is_new)
     """
+    logger.info(
+        f"Getting or creating recording for session: {snapshot_buffer.sessionId}"
+    )
     recording = recording_service.get_recording_by_session_id(
         snapshot_buffer.sessionId, org_id, db
     )
@@ -72,9 +75,29 @@ def _get_or_create_recording(
             meta_data=snapshot_buffer.metadata or {},
             analysis_status=AnalysisStatus.PENDING.value,
         )
-        recording = recording_service.create_recording(db, recording)
-        logger.info(f"Created new recording for session: {snapshot_buffer.sessionId}")
-        return recording, True
+        try:
+            recording = recording_service.create_recording(db, recording)
+            logger.info(
+                f"Created new recording for session: {snapshot_buffer.sessionId}"
+            )
+            return recording, True
+        except Exception as e:
+            # If a unique constraint violation occurred,
+            #  try to fetch the recording again
+            if (
+                "unique constraint" in str(e).lower()
+                or "duplicate key" in str(e).lower()
+            ):
+                logger.info(
+                    f"Race condition detected for session: {snapshot_buffer.sessionId}"
+                )
+                db.rollback()  # Roll back the failed transaction
+                recording = recording_service.get_recording_by_session_id(
+                    snapshot_buffer.sessionId, org_id, db
+                )
+                if recording:
+                    return recording, False
+            raise
 
     # Update user data if needed
     if client_id and (

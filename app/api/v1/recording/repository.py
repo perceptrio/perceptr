@@ -32,7 +32,7 @@ class RecordingRepository:
         end_date: Optional[datetime] = None,
     ) -> List[Recording]:
         query = self.db.query(Recording).filter(
-            Recording.org_id == org_id, Recording.deleted_at is None
+            Recording.org_id == org_id, Recording.deleted_at == None  # noqa: E711
         )
         if search:
             query = query.filter(
@@ -58,7 +58,7 @@ class RecordingRepository:
             .filter(
                 Recording.session_id == session_id,
                 Recording.org_id == org_id,
-                Recording.deleted_at is None,
+                Recording.deleted_at == None,  # noqa: E711
             )
             .first()
         )
