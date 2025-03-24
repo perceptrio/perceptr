@@ -243,7 +243,7 @@ def schedule_session_analysis(
             logger.info(f"Video saved to: {result['output_path']}")
             if settings.AI_ANALYSIS_ENABLED:
                 recording_service.analyze_local_recording(
-                    db, org_id, recording_id, recording, result["output_path"]
+                    db, org_id, recording_id, recording, result["output_path"], session
                 )
             else:
                 logger.info("AI analysis is disabled, skipping analysis")

@@ -20,6 +20,7 @@ from models.recording import Recording
 from models.recording_interval import RecordingInterval
 from sqlalchemy.orm import Session
 from utils.recording import extract_all_frames, get_recording_duration, resize_frame
+from utils.rrweb import RRWebSessionUtils
 
 from .repository import RecordingRepository
 from .schema import (
@@ -526,6 +527,20 @@ def analyze_recording(
         return None
 
 
+def filter_frames(
+    frames: List[Tuple[str, np.ndarray]], session: RRWebSessionUtils
+) -> List[Tuple[str, np.ndarray]]:
+    filtered_frames = []
+    processed_events = session.process_events()
+    logger.info(f"Stats: {processed_events['stats']}")
+    logger.info(f"Aggregated events: {processed_events['aggregated_events']}")
+    for frame in frames:
+        for event in processed_events["aggregated_events"]:
+            if frame[0] == event["timestamp"]:
+                filtered_frames.append(frame)
+    return filtered_frames
+
+
 @post_analysis_process()
 def analyze_local_recording(
     db: Session,
@@ -533,6 +548,7 @@ def analyze_local_recording(
     recording_id: int,
     recording: Recording,
     local_recording_path: str,
+    session: RRWebSessionUtils,
 ) -> None:
     try:
         repository = RecordingRepository(db)
@@ -540,6 +556,9 @@ def analyze_local_recording(
 
         timestamped_frames = extract_all_frames(local_recording_path, FRAMES_PER_SECOND)
         logger.info(f"Extracted {len(timestamped_frames)} frames from video")
+
+        timestamped_frames = filter_frames(timestamped_frames, session)
+        logger.info(f"Filtered {len(timestamped_frames)} frames from video")
 
         if recording.file_duration is None:
             recording.file_duration = get_recording_duration(local_recording_path)
