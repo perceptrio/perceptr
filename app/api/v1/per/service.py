@@ -254,9 +254,15 @@ def schedule_session_analysis(
         logger.info(session.get_session_summary())
         logger.info(f"Start time: {session.get_start_time()}")
         logger.info(f"End time: {session.get_end_time()}")
-        logger.info(f"Duration: {session.get_duration()}")
+        duration = session.get_duration()
+        logger.info(f"Duration: {duration}")
         logger.info(f"Events: {len(session.get_events())}")
         logger.info(f"User identity: {session.get_user_identity()}")
+
+        # Skip sessions with 0 duration
+        if duration == "00:00:00":
+            logger.info(f"Skipping analysis for session {session_id} with 0 duration")
+            return
 
         # Convert to video
         logger.info("\nConverting session to video...")
