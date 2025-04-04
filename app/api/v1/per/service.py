@@ -235,7 +235,7 @@ def schedule_session_analysis(
     logger.info(f"TODO: Implement session analysis for {session_id}")
     recording = recording_service.get_recording(db, recording_id, org_id)
     s3_path = f"{org_id}/{session_id}/events.jsonl.gz"
-    with FilesDownloader(s3_service.get_s3_client()) as downloader:
+    with FilesDownloader(s3_service.get_s3_client(), keep_temp_dir=False) as downloader:
         local_file_path = downloader.download_file_from_s3(s3_path)
 
         # Read the compressed file

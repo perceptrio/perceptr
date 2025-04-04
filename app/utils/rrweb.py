@@ -90,7 +90,10 @@ class RRWebSessionUtils:
 
         self.duration = (end_dt - start_dt).total_seconds()
 
-        self.userIdentity = self.session["userIdentity"]
+        if "userIdentity" in self.session:
+            self.userIdentity = self.session["userIdentity"]
+        else:
+            self.userIdentity = None
 
     def get_events(self) -> List[Dict[str, Any]]:
         # Ensure the return type matches the annotation
@@ -363,7 +366,7 @@ class RRWebSessionUtils:
 
         default_options = {
             "keep_mouse_moves": False,
-            "keep_focus_blur": True,
+            "keep_focus_blur": False,
             # By default, only keep clicks, not down/up events
             "keep_mouse_down_up": False,
             # By default, keep Custom events
@@ -895,7 +898,9 @@ class RRWebSessionUtils:
             return {"success": False, "error": error_message}
 
     def process_events(
-        self, filter_options: Optional[Dict[str, Any]] = None
+        self,
+        filter_options: Optional[Dict[str, Any]] = None,
+        save_events: bool = False,
     ) -> Dict[str, Any]:
         """
         Process raw events by filtering important events and aggregating them by second.
@@ -906,6 +911,8 @@ class RRWebSessionUtils:
         Args:
             filter_options: Optional dict with filtering parameters
                 (same as filter_important_events)
+            save_events: If True, save the aggregated events to a file named
+                `agg_events.json` in the same directory as the input file.
 
         Returns:
             Dict containing:
@@ -913,7 +920,12 @@ class RRWebSessionUtils:
                 - filtered_events: List of filtered events
                 - aggregated_events: List of aggregated events (one per second)
                 - stats: Dictionary with statistics about the processing
+                - output_path: Path where aggregated events were saved (if provided)
+                - save_success: Boolean indicating if saving was successful (if path provided)
+                - save_error: Error message if saving failed (if path provided)
         """
+        result: Dict[str, Any] = {"success": False}  # Initialize result dict
+
         try:
             # Step 1: Get structured events
             structured_events = self.convert_events_to_structured_json()
@@ -925,14 +937,20 @@ class RRWebSessionUtils:
             aggregated_events = self.aggregate_events_by_second(filtered_events)
 
             # Calculate statistics
-            reduction_from_original = 100 - (
-                len(filtered_events) / len(structured_events) * 100
+            reduction_from_original = (
+                100 - (len(filtered_events) / len(structured_events) * 100)
+                if structured_events
+                else 0
             )
-            reduction_to_aggregated = 100 - (
-                len(aggregated_events) / len(filtered_events) * 100
+            reduction_to_aggregated = (
+                100 - (len(aggregated_events) / len(filtered_events) * 100)
+                if filtered_events
+                else 0
             )
-            total_reduction = 100 - (
-                len(aggregated_events) / len(structured_events) * 100
+            total_reduction = (
+                100 - (len(aggregated_events) / len(structured_events) * 100)
+                if structured_events
+                else 0
             )
 
             stats = {
@@ -948,12 +966,42 @@ class RRWebSessionUtils:
             if filter_options:
                 stats["filter_options"] = filter_options
 
-            return {
+            result = {
                 "success": True,
                 "filtered_events": filtered_events,
                 "aggregated_events": aggregated_events,
                 "stats": stats,
             }
+
+            # Step 4: Save aggregated events if save_events is True
+            if save_events:
+                # Determine output path based on input file path
+                input_dir = os.path.dirname(self.file_path)
+                output_path = os.path.join(input_dir, "agg_events.json")
+
+                result["output_path"] = output_path
+                try:
+                    # Create a session object structure for saving
+                    aggregated_session = self.session.copy()
+                    aggregated_session["data"] = aggregated_events
+
+                    with open(output_path, "w", encoding="utf-8") as f:
+                        json.dump(aggregated_session, f, indent=2)
+
+                    result["save_success"] = True
+                    print(f"Aggregated events successfully saved to {output_path}")
+
+                except Exception as save_e:
+                    save_error_message = (
+                        f"Error saving aggregated events: {str(save_e)}"
+                    )
+                    print(save_error_message)
+                    result["save_success"] = False
+                    result["save_error"] = save_error_message
+                    # Keep overall success as True since processing succeeded
+                    # but add save error info.
+
+            return result
 
         except Exception as e:
             error_message = f"Error processing events: {str(e)}"
@@ -965,7 +1013,7 @@ class RRWebSessionUtils:
 if __name__ == "__main__":
     try:
         # Example file path - replace with your actual file path
-        file_path = "recordings/rrweb/t.json"
+        file_path = "recordings/web-sdk/1.json"
 
         # Initialize session utils
         session = RRWebSessionUtils(file_path)
@@ -983,14 +1031,6 @@ if __name__ == "__main__":
         # output_path = os.path.splitext(file_path)[0] + "_structured.json"
         # result = session.save_structured_json(output_path)
         # print(result)
-
-        # if result["success"]:
-        #     print(f"\nStructured JSON conversion successful!")
-        #     print(f"JSON saved to: {result['output_path']}")
-        #     print(f"Total events processed: {result['event_count']}")
-        # else:
-        #     print("\nStructured JSON conversion failed!")
-        #     print(f"Error: {result['error']}")
 
         # # Filter events to important ones
         # print("\nFiltering session events...")
@@ -1062,18 +1102,18 @@ if __name__ == "__main__":
         print(processed_events["stats"])
 
         # Convert to video
-        # print("\nConverting session to video...")
-        # result = session.convert_events_to_video()
+        print("\nConverting session to video...")
+        result = session.convert_events_to_video()
 
-        # if result["success"]:
-        #     print("\nVideo conversion successful!")
-        #     print(f"Video saved to: {result['output_path']}")
-        # else:
-        #     print("\nVideo conversion failed!")
-        #     if "error" in result:
-        #         print(f"Error: {result['error']}")
-        #     else:
-        #         print(f"Message: {result['message']}")
+        if result["success"]:
+            print("\nVideo conversion successful!")
+            print(f"Video saved to: {result['output_path']}")
+        else:
+            print("\nVideo conversion failed!")
+            if "error" in result:
+                print(f"Error: {result['error']}")
+            else:
+                print(f"Message: {result['message']}")
 
     except Exception as e:
         print(f"Error: {e}")
