@@ -46,6 +46,9 @@ def _get_or_create_recording(
     Returns:
         tuple: (recording, is_new)
     """
+    logger.info(
+        f"Getting or creating recording for session: {snapshot_buffer.sessionId}"
+    )
     recording = recording_service.get_recording_by_session_id(
         snapshot_buffer.sessionId, org_id, db
     )
@@ -72,9 +75,29 @@ def _get_or_create_recording(
             meta_data=snapshot_buffer.metadata or {},
             analysis_status=AnalysisStatus.PENDING.value,
         )
-        recording = recording_service.create_recording(db, recording)
-        logger.info(f"Created new recording for session: {snapshot_buffer.sessionId}")
-        return recording, True
+        try:
+            recording = recording_service.create_recording(db, recording)
+            logger.info(
+                f"Created new recording for session: {snapshot_buffer.sessionId}"
+            )
+            return recording, True
+        except Exception as e:
+            # If a unique constraint violation occurred,
+            #  try to fetch the recording again
+            if (
+                "unique constraint" in str(e).lower()
+                or "duplicate key" in str(e).lower()
+            ):
+                logger.info(
+                    f"Race condition detected for session: {snapshot_buffer.sessionId}"
+                )
+                db.rollback()  # Roll back the failed transaction
+                recording = recording_service.get_recording_by_session_id(
+                    snapshot_buffer.sessionId, org_id, db
+                )
+                if recording:
+                    return recording, False
+            raise
 
     # Update user data if needed
     if client_id and (
@@ -212,7 +235,7 @@ def schedule_session_analysis(
     logger.info(f"TODO: Implement session analysis for {session_id}")
     recording = recording_service.get_recording(db, recording_id, org_id)
     s3_path = f"{org_id}/{session_id}/events.jsonl.gz"
-    with FilesDownloader(s3_service.get_s3_client()) as downloader:
+    with FilesDownloader(s3_service.get_s3_client(), keep_temp_dir=False) as downloader:
         local_file_path = downloader.download_file_from_s3(s3_path)
 
         # Read the compressed file
@@ -231,9 +254,15 @@ def schedule_session_analysis(
         logger.info(session.get_session_summary())
         logger.info(f"Start time: {session.get_start_time()}")
         logger.info(f"End time: {session.get_end_time()}")
-        logger.info(f"Duration: {session.get_duration()}")
+        duration = session.get_duration()
+        logger.info(f"Duration: {duration}")
         logger.info(f"Events: {len(session.get_events())}")
         logger.info(f"User identity: {session.get_user_identity()}")
+
+        # Skip sessions with 0 duration
+        if duration == "00:00:00":
+            logger.info(f"Skipping analysis for session {session_id} with 0 duration")
+            return
 
         # Convert to video
         logger.info("\nConverting session to video...")
@@ -243,7 +272,7 @@ def schedule_session_analysis(
             logger.info(f"Video saved to: {result['output_path']}")
             if settings.AI_ANALYSIS_ENABLED:
                 recording_service.analyze_local_recording(
-                    db, org_id, recording_id, recording, result["output_path"]
+                    db, org_id, recording_id, recording, result["output_path"], session
                 )
             else:
                 logger.info("AI analysis is disabled, skipping analysis")

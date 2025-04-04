@@ -19,7 +19,13 @@ from models.issue_recording import IssueRecording
 from models.recording import Recording
 from models.recording_interval import RecordingInterval
 from sqlalchemy.orm import Session
-from utils.recording import extract_all_frames, get_recording_duration, resize_frame
+from utils.recording import (
+    extract_all_frames,
+    extract_frames_at_timestamps,
+    get_recording_duration,
+    resize_frame,
+)
+from utils.rrweb import RRWebSessionUtils
 
 from .repository import RecordingRepository
 from .schema import (
@@ -526,6 +532,20 @@ def analyze_recording(
         return None
 
 
+def filter_frames(
+    frames: List[Tuple[str, np.ndarray]], session: RRWebSessionUtils
+) -> List[Tuple[str, np.ndarray]]:
+    filtered_frames = []
+    processed_events = session.process_events(save_events=True)
+    logger.info(f"Stats: {processed_events['stats']}")
+    # logger.info(f"Aggregated events: {processed_events['aggregated_events']}")
+    for frame in frames:
+        for event in processed_events["aggregated_events"]:
+            if frame[0] == event["timestamp"]:
+                filtered_frames.append(frame)
+    return filtered_frames
+
+
 @post_analysis_process()
 def analyze_local_recording(
     db: Session,
@@ -533,40 +553,140 @@ def analyze_local_recording(
     recording_id: int,
     recording: Recording,
     local_recording_path: str,
+    session: RRWebSessionUtils,
 ) -> None:
     try:
         repository = RecordingRepository(db)
         issue_repository = IssueRepository(db)
 
-        timestamped_frames = extract_all_frames(local_recording_path, FRAMES_PER_SECOND)
-        logger.info(f"Extracted {len(timestamped_frames)} frames from video")
+        # Process events first to get timestamps
+        processed_events = session.process_events(save_events=False)
+        logger.info(f"Stats: {processed_events['stats']}")
 
+        # Get session start time in milliseconds (absolute)
+        session_start_time_ms = session.get_start_time()
+        if not isinstance(session_start_time_ms, int):
+            # Fallback if start time is not an int (e.g. from JSONL parsing)
+            if processed_events["aggregated_events"]:
+                session_start_time_ms = processed_events["aggregated_events"][0][
+                    "raw_timestamp_start"
+                ]
+            else:
+                session_start_time_ms = 0  # Or raise an error if no events
+
+        # Extract absolute end timestamps (ms) for each aggregated second
+        absolute_timestamps_ms = [
+            event["raw_timestamp_end"]
+            for event in processed_events["aggregated_events"]
+        ]
+
+        # Calculate relative timestamps in seconds (for video frame extraction)
+        relative_timestamps_sec = [
+            (ts - session_start_time_ms) / 1000.0 for ts in absolute_timestamps_ms
+        ]
+        # Ensure timestamps are non-negative
+        relative_timestamps_sec = [max(0, ts) for ts in relative_timestamps_sec]
+
+        # Extract frames only at the specific relative timestamps
+        # timestamped_frames will be List[Tuple[float, np.ndarray]]
+        timestamped_frames = extract_frames_at_timestamps(
+            local_recording_path, relative_timestamps_sec
+        )
+        logger.info(
+            f"Extracted {len(timestamped_frames)} frames based on {len(relative_timestamps_sec)} event timestamps"
+        )
+
+        # Get video duration
         if recording.file_duration is None:
             recording.file_duration = get_recording_duration(local_recording_path)
+        video_duration = recording.file_duration or 0
+        logger.info(
+            f"Recording {recording_id}: Calculated video duration: {video_duration:.2f} seconds"
+        )
 
         analyzed_intervals = []
         recording_intervals_summary = ""
-        total_intervals = len(range(0, len(timestamped_frames), INTERVAL_DURATION))
+        total_intervals = (
+            (int(video_duration) // INTERVAL_DURATION)
+            + (1 if video_duration % INTERVAL_DURATION > 0 else 0)
+            if video_duration > 0
+            else 1
+        )
 
-        for idx, i in enumerate(range(0, len(timestamped_frames), INTERVAL_DURATION)):
-            interval_frames = timestamped_frames[i : i + INTERVAL_DURATION]
-            timestamps = [t for t, _ in interval_frames]
-            logger.info(f"Processing interval {timestamps}")
-            recording_intervals, recording_interval_summary = analyze_interval(
+        # Iterate through time intervals (0-30s, 30-60s, etc.)
+        for i in range(0, int(video_duration) + INTERVAL_DURATION, INTERVAL_DURATION):
+            interval_start_time = i
+            interval_end_time = i + INTERVAL_DURATION
+            current_interval_idx = interval_start_time // INTERVAL_DURATION
+
+            logger.info(
+                f"Processing time interval {interval_start_time}s - {interval_end_time}s"
+            )
+
+            # Filter frames that belong to this time interval
+            interval_frames = [
+                (ts, frame)
+                for ts, frame in timestamped_frames
+                if interval_start_time <= ts < interval_end_time
+            ]
+
+            if not interval_frames:
+                logger.info(
+                    f"No frames found for interval {interval_start_time}s - {interval_end_time}s"
+                )
+                # Update progress even if interval is empty
+                progress = min(
+                    round((current_interval_idx + 1) / total_intervals * 100, 2), 99.99
+                )
+                recording.analysis_progress = progress
+                repository.update(recording)
+                continue  # Skip analysis if no frames
+
+            # Extract float timestamps for logging/processing within this interval
+            float_timestamps_in_interval = [t for t, _ in interval_frames]
+
+            # Format timestamps for logging (HH:MM:SS.fff)
+            log_timestamps = []
+            logger.debug(
+                f"DEBUG: float_timestamps_in_interval = {float_timestamps_in_interval}"
+            )
+            for ts_in_interval in float_timestamps_in_interval:
+                # Use ts_in_interval for calculations
+                hours, remainder = divmod(ts_in_interval, 3600)
+                minutes, seconds_full = divmod(remainder, 60)
+                seconds, milliseconds_frac = divmod(seconds_full, 1)
+                milliseconds_int = int(milliseconds_frac * 1000)
+
+                # Add more debug logging
+                logger.debug(
+                    f"DEBUG: Formatting ts={ts_in_interval:.3f} -> H={int(hours)}, M={int(minutes)}, S={int(seconds)}, MS={milliseconds_int}"
+                )
+
+                log_timestamps.append(
+                    f"{int(hours):02d}:{int(minutes):02d}:{int(seconds):02d}.{milliseconds_int:03d}"
+                )
+
+            logger.info(f"Frames within interval: {log_timestamps}")
+
+            # Analyze the frames for this interval
+            analyzed_interval_data, recording_interval_summary = analyze_interval(
                 org_id, recording_id, interval_frames, should_resize_frame=True
             )
+
             summary_text = (
-                f"Interval {timestamps[0]} - {timestamps[-1]} summary: "
+                f"Interval {interval_start_time}s - {interval_end_time}s summary: "
                 f"{recording_interval_summary}"
             )
             recording_intervals_summary += "\n" + summary_text
 
             # Update interval analysis progress
-            progress = min(round((idx + 1) / total_intervals * 100, 2), 99.99)
+            progress = min(
+                round((current_interval_idx + 1) / total_intervals * 100, 2), 99.99
+            )
             recording.analysis_progress = progress
             repository.update(recording)
 
-            analyzed_intervals.extend(recording_intervals)
+            analyzed_intervals.extend(analyzed_interval_data)
 
         has_intervals = (
             recording_intervals_service.check_recording_intervals_with_recording_id(

@@ -9,10 +9,11 @@ from settings import settings
 
 
 class FilesDownloader:
-    def __init__(self, s3_client: boto3.client):
+    def __init__(self, s3_client: boto3.client, keep_temp_dir: bool = False):
         self.s3_client = s3_client
         self.bucket_name = settings.AWS_BUCKET_NAME
         self.temp_dir = tempfile.mkdtemp()
+        self.keep_temp_dir = keep_temp_dir
         logger.info(f"Temporary folder created: {self.temp_dir}")
 
     def download_file_from_s3(self, key: str) -> str:
@@ -33,5 +34,8 @@ class FilesDownloader:
         exc_value: Optional[Exception],
         traceback: Optional[Any],
     ) -> None:
-        shutil.rmtree(self.temp_dir)
-        logger.info(f"Temporary folder deleted: {self.temp_dir}")
+        if not self.keep_temp_dir:
+            shutil.rmtree(self.temp_dir)
+            logger.info(f"Temporary folder deleted: {self.temp_dir}")
+        else:
+            logger.info(f"Temporary folder kept: {self.temp_dir}")
