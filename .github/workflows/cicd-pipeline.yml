@@ -1,0 +1,156 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - dev
+      - main
+      - stg
+
+env:
+  AWS_REGION: "us-east-1"
+
+permissions:
+  id-token: write # This is required for requesting the JWT
+  contents: read # This is required for actions/checkout
+
+jobs:
+  Init:
+    runs-on: ubuntu-latest
+    outputs:
+      IMAGE_TAG: ${{ steps.set-variables.outputs.IMAGE_TAG }}
+      ECR_REPOSITORY: ${{ steps.set-variables.outputs.ECR_REPOSITORY }}
+      CLUSTER_NAME: ${{ steps.set-variables.outputs.CLUSTER_NAME }}
+      APP_NAME: ${{ steps.set-variables.outputs.APP_NAME }}
+      CONTAINER_NAME: ${{ steps.set-variables.outputs.CONTAINER_NAME }}
+
+    steps:
+      - name: Git clone the repository
+        uses: actions/checkout@v4
+
+      - name: Determine branch and set variables
+        id: set-variables
+        run: |
+          TIMESTAMP=$(date +%s)
+          SHORT_SHA=$(git rev-parse --short $GITHUB_SHA)
+          IMAGE_TAG=${SHORT_SHA}-${TIMESTAMP}
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+          if [ "${{ github.ref }}" == "refs/heads/dev" ]; then
+            export AWS_ENV=dev
+          elif [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            export AWS_ENV=prod
+          elif [ "${{ github.ref }}" == "refs/heads/stg" ]; then
+            export AWS_ENV=stg
+          fi
+
+          echo "ECR_REPOSITORY=perceptr-$AWS_ENV-api" >> $GITHUB_OUTPUT
+          echo "CLUSTER_NAME=perceptr-$AWS_ENV-cluster" >> $GITHUB_OUTPUT
+          echo "APP_NAME=perceptr-$AWS_ENV-api" >> $GITHUB_OUTPUT
+          echo "CONTAINER_NAME=api" >> $GITHUB_OUTPUT
+
+  Test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: TODO Test
+        run: |
+          echo "TODO"
+
+  Build-Scan-Push:
+    runs-on: ubuntu-latest
+    needs: [Init, Test]
+    outputs:
+      IMAGE: ${{ steps.push-image.outputs.IMAGE }}
+    steps:
+      ## Build
+      #
+      - name: Git clone the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and export
+        uses: docker/build-push-action@v6
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        with:
+          tags: ${{ needs.Init.outputs.ECR_REPOSITORY }}:${{ needs.Init.outputs.IMAGE_TAG }}
+          outputs: type=docker,dest=/tmp/${{ needs.Init.outputs.ECR_REPOSITORY }}.tar
+
+      ## Scan
+      #
+      - name: Scan with Grype
+        run: |
+          # Install Grype
+          # curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+          # # Scan the Docker image
+          # grype /tmp/${{ needs.Init.outputs.ECR_REPOSITORY }}.tar
+          echo "TODO"
+
+      ## Push
+      #
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-to-assume: arn:aws:iam::733765149774:role/GithubActions-Perceptr-prod
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@62f4f872db3836360b72999f4b87f1ff13310f3a
+
+      - name: Load image
+        run: |
+          docker load --input /tmp/${{ needs.Init.outputs.ECR_REPOSITORY }}.tar
+          docker image ls -a
+
+      - name: Push Docker image to Amazon ECR
+        id: push-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          docker tag ${{ needs.Init.outputs.ECR_REPOSITORY }}:${{ needs.Init.outputs.IMAGE_TAG }} $ECR_REGISTRY/${{ needs.Init.outputs.ECR_REPOSITORY }}:${{ needs.Init.outputs.IMAGE_TAG }}
+          docker push $ECR_REGISTRY/${{ needs.Init.outputs.ECR_REPOSITORY }}:${{ needs.Init.outputs.IMAGE_TAG }}
+          echo "IMAGE=$ECR_REGISTRY/${{ needs.Init.outputs.ECR_REPOSITORY }}:${{ needs.Init.outputs.IMAGE_TAG }}" >> $GITHUB_OUTPUT
+
+  Deploy:
+    runs-on: ubuntu-latest
+    needs: [Init, Build-Scan-Push]
+    if: needs.Build-Scan-Push.result == 'success'
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-to-assume: arn:aws:iam::733765149774:role/GithubActions-Perceptr-prod
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download task definition
+        run: |
+          aws ecs describe-task-definition --task-definition ${{ needs.Init.outputs.APP_NAME }}-family \
+          --query taskDefinition > task-definition.json
+
+      - name: Fill in the new image ID in the Amazon ECS task definition
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: ${{ needs.Init.outputs.CONTAINER_NAME }}
+          image: ${{ needs.Build-Scan-Push.outputs.IMAGE }}
+
+      - name: Deploy Amazon ECS task definition
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          service: ${{ needs.Init.outputs.APP_NAME }}-service
+          cluster: ${{ needs.Init.outputs.CLUSTER_NAME }}
+          # wait-for-service-stability: true
+
+      - name: Update ECS Service
+        run: |
+          CLUSTER_NAME=${{ needs.Init.outputs.CLUSTER_NAME }}
+          SERVICE_NAME=${{ needs.Init.outputs.APP_NAME }}-service
+          aws ecs update-service --cluster $CLUSTER_NAME --service $SERVICE_NAME --force-new-deployment
