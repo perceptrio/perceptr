@@ -1,26 +1,25 @@
-from typing import Annotated
+import os
+import time
+from typing import Annotated, Any, Dict, List, Optional, Tuple
+
+from common.services.logger import logger
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.runnables import RunnableConfig
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
+from langfuse.decorators import langfuse_context, observe
+from langgraph.graph import END, START, StateGraph
+from settings import settings
 
 # from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
-from langgraph.graph import StateGraph, START, END
-from langchain_openai import ChatOpenAI
-from langchain_google_genai import ChatGoogleGenerativeAI
-from settings import settings
-from langchain_core.runnables import RunnableConfig
-from langchain_core.messages import SystemMessage, HumanMessage
-from langfuse.decorators import langfuse_context, observe
-from common.services.logger import logger
-import os
-import time
 
 os.environ["LANGFUSE_PUBLIC_KEY"] = settings.LANGFUSE_PUBLIC_KEY
 os.environ["LANGFUSE_SECRET_KEY"] = settings.LANGFUSE_PRIVATE_KEY
 os.environ["LANGFUSE_HOST"] = settings.LANGFUSE_HOST
 
-import google.generativeai as genai
-from pydantic import BaseModel, Field
-from typing import Optional, List, Tuple
 import numpy as np
+from pydantic import BaseModel, Field
 from utils.graph import map_timestamped_frames_to_messages
 
 
@@ -80,12 +79,12 @@ class RecordingAnalysis(BaseModel):
 
 
 class State(TypedDict):
-    timestamped_frames: List[Tuple[str, np.ndarray]]
+    timestamped_frames: List[Tuple[str, np.ndarray, str]]
     recording_analysis: RecordingAnalysis
 
 
 class RecordingAnalyzerGraph:
-    def __init__(self):
+    def __init__(self) -> None:
         graph_builder = StateGraph(State)
         self.openai_llm = ChatOpenAI(
             api_key=settings.OPENAI_API_KEY,
@@ -95,11 +94,11 @@ class RecordingAnalyzerGraph:
         )
         self.gemini_llm = ChatGoogleGenerativeAI(
             api_key=settings.GEMINI_API_KEY,
-            model="gemini-2.0-flash-exp",
+            # model="gemini-2.5-pro-exp-03-25",
+            model="gemini-2.0-flash",
             streaming=True,
             temperature=0,
         )
-        genai.configure(api_key=settings.GEMINI_API_KEY)
 
         graph_builder.add_node("recording_analyzer", self.recording_analyzer)
 
@@ -154,12 +153,11 @@ class RecordingAnalyzerGraph:
     #     return response
 
     def openai_recording_analyzer(
-        self, timestamped_frames: List[Tuple[str, np.ndarray]]
-    ):
-
+        self, timestamped_frames: List[Tuple[str, np.ndarray, str]]
+    ) -> RecordingAnalysis:
         # Create the prompt.
         prompt = """
-You are an expert UI/UX Researcher analyzing a user session. You are given a list of timestamps along with an image of the user's screen at each timestamp. Your task is to analyze the recording and provide a detailed, grouped, timestamped analysis of the user's actions, behavior, and any UI issues observed. **Group consecutive timestamps that represent similar or related actions into a single interval.** Each interval should capture a single action or a set of related actions.
+You are an expert UI/UX Researcher analyzing a user session. You are given a list of timestamps along with an image of the user's screen at each timestamp and an RRWeb summary of the event at each timestamp. Your task is to analyze the recording and provide a detailed, grouped, timestamped analysis of the user's actions, behavior, and any UI issues observed. **Group consecutive timestamps that represent similar or related actions into a single interval.** Each interval should capture a single action or a set of related actions.
 
 **For each interval, include:**
 - **Start Time:** The first timestamp in the group.
@@ -171,7 +169,7 @@ You are an expert UI/UX Researcher analyzing a user session. You are given a lis
   - **USABILITY_ISSUE:** Problems that hinder user experience but do not completely break functionality.
   - **PERFORMANCE_ISSUE:** Concerns related to speed, load times, or responsiveness. Only mark as performance issue if the loading time is more than 3 seconds.
   - **ENHANCEMENT:** Suggestions for improvements or new features to enhance the user experience.
-  - **NORMAL:** Routine user actions without any apparent issues. 
+  - **NORMAL:** Routine user actions without any apparent issues.
   *Note: If any issue is detected, it should override the NORMAL categorization.*
 - **Short Title:** A short title for the interval.
 - **Timestamp Descriptions:** A list of timestamp descriptions for every timestamp included in the interval. Contains the following fields:
@@ -203,7 +201,7 @@ You are an expert UI/UX Researcher analyzing a user session. You are given a lis
 
 5. **Performance & Responsiveness:**
    - Observe any lag, slow load times, or sudden reflows of the UI.
-   - Identify any elements that are unresponsive or cause delays in the user’s workflow.
+   - Identify any elements that are unresponsive or cause delays in the user's workflow.
 
 6. **Error Handling & Feedback:**
    - Document any bugs or errors that occur and how the UI communicates them.
@@ -212,27 +210,27 @@ You are an expert UI/UX Researcher analyzing a user session. You are given a lis
 7. **Opportunities for Enhancement:**
    - Suggest improvements for usability and overall design.
    - Recommend new features or refinements that could streamline user interactions.
-   - Provide actionable insights to improve the user experience (e.g., “Increase button size for better touch targets,” “Improve color contrast for readability”).
+   - Provide actionable insights to improve the user experience (e.g., "Increase button size for better touch targets," "Improve color contrast for readability").
 
 **Instructions:**
 
-- **Grouping:**  
+- **Grouping:**
   - **Group consecutive timestamps** that reflect a single action or a set of related actions into one interval.
   - If a timestamp clearly represents a distinct action not related to its neighbors, it should start a new interval.
-  
-- **Comprehensiveness:**  
+
+- **Comprehensiveness:**
   - Ensure that every provided timestamp is included in the analysis either as its own interval or as part of a grouped interval.
   - Provide both macro-level (overall session behavior) and micro-level (detailed UI element interactions) insights.
 
-- **Clarity:**  
+- **Clarity:**
   - Use clear, concise language. Reference specific timestamps, UI elements, and user behaviors.
-  
-- **Actionable Insights:**  
+
+- **Actionable Insights:**
   - Provide concrete recommendations for each identified issue, prioritizing bugs and usability issues over normal interactions.
 
-- **Final Check:**  
+- **Final Check:**
   - Before finalizing your analysis, verify that every provided timestamp is included in the output and appropriately grouped into intervals based on similarity of actions.
-        
+
                     """
 
         messages = [
@@ -240,10 +238,10 @@ You are an expert UI/UX Researcher analyzing a user session. You are given a lis
             *map_timestamped_frames_to_messages(timestamped_frames),
         ]
 
-        response = self.openai_llm.with_structured_output(RecordingAnalysis).invoke(
+        response = self.gemini_llm.with_structured_output(RecordingAnalysis).invoke(
             messages
         )
-        return response
+        return response  # type: ignore[no-any-return]
 
     def recording_analyzer(self, state: State, config: RunnableConfig) -> dict:
         timestamped_frames = state["timestamped_frames"]
@@ -291,17 +289,16 @@ You are an expert UI/UX Researcher analyzing a user session. You are given a lis
     #         "recording_intervals": response
     #     }
 
-    def get_graph(self):
+    def get_graph(self) -> StateGraph:
         return self.graph
 
-    @observe()
+    @observe()  # type: ignore[misc]
     def analyze_recording(
         self,
         org_id: str,
         recording_id: str,
-        timestamped_frames: List[Tuple[str, np.ndarray]],
-    ) -> dict:
-
+        timestamped_frames: List[Tuple[str, np.ndarray, str]],
+    ) -> Dict[str, Any]:
         langfuse_context.update_current_trace(
             session_id=recording_id,
             user_id=org_id,
@@ -323,7 +320,7 @@ You are an expert UI/UX Researcher analyzing a user session. You are given a lis
                 config=config,
                 # debug=True
             )
-            return resp
+            return resp  # type: ignore[no-any-return]
         except Exception as e:
-            logger.error("Error creating graph with response", {"error": str(e)})
+            logger.error(f"Error creating graph with response error: {str(e)}")
             raise e
