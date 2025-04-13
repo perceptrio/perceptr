@@ -1,4 +1,4 @@
-FROM python:3.13.2
+FROM python:3.11.2-slim
 
 # Install Node.js and npm
 RUN apt-get update && apt-get install -y \
