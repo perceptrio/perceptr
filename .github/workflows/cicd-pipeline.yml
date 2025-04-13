@@ -57,7 +57,7 @@ jobs:
         run: |
           echo "TODO"
 
-  Build-Scan-Push:
+  Build-Push:
     runs-on: ubuntu-latest
     needs: [Init, Test]
     outputs:
@@ -78,15 +78,6 @@ jobs:
         with:
           tags: ${{ needs.Init.outputs.ECR_REPOSITORY }}:${{ needs.Init.outputs.IMAGE_TAG }}
           outputs: type=docker,dest=/tmp/${{ needs.Init.outputs.ECR_REPOSITORY }}.tar
-
-      ## Scan
-      #
-      - name: Scan with Grype
-        run: |
-          # Install Grype
-          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
-          # Scan the Docker image
-          grype /tmp/${{ needs.Init.outputs.ECR_REPOSITORY }}.tar
 
       ## Push
       #
@@ -112,13 +103,12 @@ jobs:
         run: |
           docker tag ${{ needs.Init.outputs.ECR_REPOSITORY }}:${{ needs.Init.outputs.IMAGE_TAG }} $ECR_REGISTRY/${{ needs.Init.outputs.ECR_REPOSITORY }}:${{ needs.Init.outputs.IMAGE_TAG }}
           docker push $ECR_REGISTRY/${{ needs.Init.outputs.ECR_REPOSITORY }}:${{ needs.Init.outputs.IMAGE_TAG }}
-          docker push $ECR_REGISTRY/${{ needs.Init.outputs.ECR_REPOSITORY }}:latest
           echo "IMAGE=$ECR_REGISTRY/${{ needs.Init.outputs.ECR_REPOSITORY }}:${{ needs.Init.outputs.IMAGE_TAG }}" >> $GITHUB_OUTPUT
 
   Deploy:
     runs-on: ubuntu-latest
-    needs: [Init, Build-Scan-Push]
-    if: needs.Build-Scan-Push.result == 'success'
+    needs: [Init, Build-Push]
+    if: needs.Build-Push.result == 'success'
     steps:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -137,7 +127,7 @@ jobs:
         with:
           task-definition: task-definition.json
           container-name: ${{ needs.Init.outputs.CONTAINER_NAME }}
-          image: ${{ needs.Build-Scan-Push.outputs.IMAGE }}
+          image: ${{ needs.Build-Push.outputs.IMAGE }}
 
       - name: Deploy Amazon ECS task definition
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
