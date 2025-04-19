@@ -1,5 +1,6 @@
+from typing import Any, Dict, List, Literal, Optional
+
 from pydantic import BaseModel
-from typing import List, Dict, Any, Literal, Optional
 
 
 class NetworkRequest(BaseModel):
@@ -42,3 +43,13 @@ class SnapshotBuffer(BaseModel):
 class GenericResponse(BaseModel):
     success: bool
     message: Optional[str] = None
+
+
+class BatchUrlResponse(BaseModel):
+    """Response model for batch upload URL generation"""
+
+    success: bool
+    message: Optional[str] = None
+    url: Optional[str] = None
+    batch_number: Optional[int] = None
+    file_path: Optional[str] = None
