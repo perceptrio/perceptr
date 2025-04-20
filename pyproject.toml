@@ -31,7 +31,8 @@ dependencies = [
     "langchain-google-genai (>=2.0.8,<3.0.0)",
     "langchain (>=0.3.14,<0.4.0)",
     "opencv-python (>=4.10.0.84,<5.0.0.0)",
-    "boto3 (>=1.36.1,<2.0.0)"
+    "boto3 (>=1.36.1,<2.0.0)",
+    "httpx (>=0.27.0,<0.28.0)"
 ]
 
 
