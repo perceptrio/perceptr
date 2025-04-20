@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 from api.v1.analytics.router import router as analytics_router
+from api.v1.email.router import router as email_router
 from api.v1.issue.router import router as issue_router
 from api.v1.org.router import router as org_router
 from api.v1.per.router import router as per_router
@@ -56,6 +57,7 @@ app.include_router(recording_router)
 app.include_router(recording_interval_router)
 app.include_router(issue_router)
 app.include_router(analytics_router)
+app.include_router(email_router)
 # SDK router
 app.include_router(per_router)
 
