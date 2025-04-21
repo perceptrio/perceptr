@@ -18,10 +18,9 @@ from fastapi.middleware.cors import CORSMiddleware
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Startup
     try:
-        logger.info("Starting SQS listener service...")
         sqs_listener = get_sqs_listener()
-        await sqs_listener.start()
-        logger.info("SQS listener service started successfully")
+        # await sqs_listener.start()
+        # logger.info("SQS listener service started successfully")
     except Exception as e:
         logger.error(f"Failed to start SQS listener service: {str(e)}")
 
@@ -30,10 +29,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     finally:
         # Ensure cleanup happens in finally block
         try:
-            logger.info("Stopping SQS listener service...")
             sqs_listener = get_sqs_listener()
-            await sqs_listener.stop()
-            logger.info("SQS listener service stopped successfully")
+            # await sqs_listener.stop()
+            # logger.info("SQS listener service stopped successfully")
         except Exception as e:
             logger.error(f"Error while stopping SQS listener service: {str(e)}")
 

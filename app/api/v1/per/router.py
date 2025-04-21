@@ -1,5 +1,6 @@
 import re
 
+from common.enums import AnalysisStatus
 from common.services.s3 import s3_service
 from core.constants import APIPath
 from database import get_db
@@ -31,7 +32,6 @@ def check_project_id(
 RECORDING_PATH = "/{project_id}/r"
 
 
-# TODO: Delete this endpoint
 @router.post(  # type: ignore
     RECORDING_PATH + "/events",
     response_model=GenericResponse,
@@ -61,6 +61,30 @@ async def record_events(
         return GenericResponse(
             success=False, message=f"Failed to process events: {str(e)}"
         )
+
+
+@router.post(  # type: ignore
+    RECORDING_PATH + "/{session_id}/process",
+    response_model=GenericResponse,
+)
+async def process_session(
+    project_id: str,
+    session_id: str,
+    db: Session = Depends(get_db),
+) -> GenericResponse:
+    """Trigger a session"""
+    # Validate project ID
+    org = service.get_org_by_project_id(db, project_id)
+    if org is None:
+        raise HTTPException(status_code=400, detail="Invalid project id")
+
+    recording = service.get_recording_by_session_id(db, session_id)
+    if recording and recording.status != AnalysisStatus.PENDING:
+        raise HTTPException(status_code=400, detail="Session not in pending state")
+
+    # Trigger the session
+    service.process_session(db, org.id, session_id)
+    return GenericResponse(success=True, message="Session triggered successfully")
 
 
 @router.get(  # type: ignore
