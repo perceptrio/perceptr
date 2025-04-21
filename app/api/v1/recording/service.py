@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, time
 from typing import Any, Callable, List, Optional, Tuple, TypeVar, cast
 
 import numpy as np
@@ -14,6 +14,7 @@ from fastapi import HTTPException, status
 from graphs.issues_summarizer_graph import IssuesSummarizerGraph
 from graphs.recording_analyzer_graph import RecordingAnalyzerGraph
 from graphs.recording_summarizer_graph import RecordingSummarizerGraph
+from graphs.video_recording_analyzer_graph import VideoRecordingAnalyzerGraph
 from models.issue import Issue
 from models.issue_recording import IssueRecording
 from models.recording import Recording
@@ -295,20 +296,36 @@ def summarize_recording(
     )
 
 
+def format_timestamp(seconds: float) -> str:
+    """Converts float seconds to HH:MM:SS format."""
+    if not isinstance(seconds, (int, float)) or seconds < 0:
+        logger.warning(
+            f"Invalid timestamp encountered: {seconds}. Defaulting to 00:00:00"
+        )
+        return "00:00:00"
+    # No need for math.modf if we just need HH:MM:SS
+    total_seconds = int(round(seconds))  # Round to nearest second for HH:MM:SS
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
 def analyze_interval(
     org_id: int,
     recording_id: int,
-    interval_frames: List[Tuple[str, np.ndarray]],
+    interval_frames: List[Tuple[str, np.ndarray, str]],
     should_resize_frame: bool = True,
 ) -> Tuple[List[RecordingInterval], str]:
     graph = RecordingAnalyzerGraph()
+
     if should_resize_frame:
-        resized_frames = [
-            (t, resize_frame(f, height=FRAME_HEIGHT)) for t, f in interval_frames
+        frames_for_graph = [
+            (t, resize_frame(f, height=FRAME_HEIGHT), s) for t, f, s in interval_frames
         ]
     else:
-        resized_frames = interval_frames
-    interval_response = graph.analyze_recording(org_id, recording_id, resized_frames)
+        frames_for_graph = interval_frames
+
+    interval_response = graph.analyze_recording(org_id, recording_id, frames_for_graph)
     recording_intervals_analysis = interval_response["recording_analysis"].intervals
 
     recording_interval_summary = interval_response["recording_analysis"].summary
@@ -562,22 +579,20 @@ def analyze_local_recording(
         # Process events first to get timestamps
         processed_events = session.process_events(save_events=False)
         logger.info(f"Stats: {processed_events['stats']}")
+        aggregated_events = processed_events.get("aggregated_events", [])
 
         # Get session start time in milliseconds (absolute)
         session_start_time_ms = session.get_start_time()
         if not isinstance(session_start_time_ms, int):
             # Fallback if start time is not an int (e.g. from JSONL parsing)
-            if processed_events["aggregated_events"]:
-                session_start_time_ms = processed_events["aggregated_events"][0][
-                    "raw_timestamp_start"
-                ]
+            if aggregated_events:
+                session_start_time_ms = aggregated_events[0]["raw_timestamp_start"]
             else:
                 session_start_time_ms = 0  # Or raise an error if no events
 
         # Extract absolute end timestamps (ms) for each aggregated second
         absolute_timestamps_ms = [
-            event["raw_timestamp_end"]
-            for event in processed_events["aggregated_events"]
+            event["raw_timestamp_end"] for event in aggregated_events
         ]
 
         # Calculate relative timestamps in seconds (for video frame extraction)
@@ -589,12 +604,25 @@ def analyze_local_recording(
 
         # Extract frames only at the specific relative timestamps
         # timestamped_frames will be List[Tuple[float, np.ndarray]]
-        timestamped_frames = extract_frames_at_timestamps(
+        extracted_frames: List[Tuple[float, np.ndarray]] = extract_frames_at_timestamps(
             local_recording_path, relative_timestamps_sec
         )
         logger.info(
-            f"Extracted {len(timestamped_frames)} frames based on {len(relative_timestamps_sec)} event timestamps"
+            f"Extracted {len(extracted_frames)} frames based on {len(relative_timestamps_sec)} event timestamps"
         )
+
+        # Combine frames with their corresponding aggregated event summaries
+        timestamped_frames_with_summary: List[Tuple[float, np.ndarray, str]] = []
+        min_len = min(len(extracted_frames), len(aggregated_events))
+        if len(extracted_frames) != len(aggregated_events):
+            logger.warning(
+                f"Recording {recording_id}: Mismatch in frame count ({len(extracted_frames)}) and aggregated event count ({len(aggregated_events)}). Using minimum length: {min_len}"
+            )
+        for i in range(min_len):
+            timestamp, frame = extracted_frames[i]
+            # Get summary, default to 'N/A' if missing
+            summary = aggregated_events[i].get("summary", "N/A")
+            timestamped_frames_with_summary.append((timestamp, frame, summary))
 
         # Get video duration
         if recording.file_duration is None:
@@ -623,14 +651,15 @@ def analyze_local_recording(
                 f"Processing time interval {interval_start_time}s - {interval_end_time}s"
             )
 
-            # Filter frames that belong to this time interval
-            interval_frames = [
-                (ts, frame)
-                for ts, frame in timestamped_frames
+            # Filter frames that belong to this time interval (timestamps are float seconds here)
+            # Use the new structure: (float_timestamp, frame_data, summary)
+            interval_frames_with_summary = [
+                (ts, frame, summary)
+                for ts, frame, summary in timestamped_frames_with_summary
                 if interval_start_time <= ts < interval_end_time
             ]
 
-            if not interval_frames:
+            if not interval_frames_with_summary:
                 logger.info(
                     f"No frames found for interval {interval_start_time}s - {interval_end_time}s"
                 )
@@ -642,39 +671,33 @@ def analyze_local_recording(
                 repository.update(recording)
                 continue  # Skip analysis if no frames
 
-            # Extract float timestamps for logging/processing within this interval
-            float_timestamps_in_interval = [t for t, _ in interval_frames]
+            # Format timestamps to HH:MM:SS strings *before* calling analyze_interval
+            # Prepare the List[Tuple[str, np.ndarray]] structure expected by analyze_interval
+            formatted_interval_frames_for_analysis: List[
+                Tuple[str, np.ndarray, str]
+            ] = [
+                (format_timestamp(ts_float), frame, summary)
+                for ts_float, frame, summary in interval_frames_with_summary  # Ignore summary here
+            ]
 
-            # Format timestamps for logging (HH:MM:SS.fff)
-            log_timestamps = []
-            logger.debug(
-                f"DEBUG: float_timestamps_in_interval = {float_timestamps_in_interval}"
-            )
-            for ts_in_interval in float_timestamps_in_interval:
-                # Use ts_in_interval for calculations
-                hours, remainder = divmod(ts_in_interval, 3600)
-                minutes, seconds_full = divmod(remainder, 60)
-                seconds, milliseconds_frac = divmod(seconds_full, 1)
-                milliseconds_int = int(milliseconds_frac * 1000)
-
-                # Add more debug logging
-                logger.debug(
-                    f"DEBUG: Formatting ts={ts_in_interval:.3f} -> H={int(hours)}, M={int(minutes)}, S={int(seconds)}, MS={milliseconds_int}"
-                )
-
-                log_timestamps.append(
-                    f"{int(hours):02d}:{int(minutes):02d}:{int(seconds):02d}.{milliseconds_int:03d}"
-                )
-
+            # Log the formatted HH:MM:SS timestamps for this interval
+            log_timestamps = [t for t, _, _ in formatted_interval_frames_for_analysis]
             logger.info(f"Frames within interval: {log_timestamps}")
 
-            # Analyze the frames for this interval
+            logger.info(
+                f"Formatted interval frames for analysis: {formatted_interval_frames_for_analysis[0][2]}"
+            )
+
+            # Analyze the frames for this interval using the formatted timestamps
             analyzed_interval_data, recording_interval_summary = analyze_interval(
-                org_id, recording_id, interval_frames, should_resize_frame=True
+                org_id,
+                recording_id,
+                formatted_interval_frames_for_analysis,
+                should_resize_frame=True,
             )
 
             summary_text = (
-                f"Interval {interval_start_time}s - {interval_end_time}s summary: "
+                f"Interval {format_timestamp(interval_start_time)} - {format_timestamp(interval_end_time - 0.001)} summary: "
                 f"{recording_interval_summary}"
             )
             recording_intervals_summary += "\n" + summary_text
@@ -740,4 +763,182 @@ def analyze_local_recording(
             recording.set_analysis_status(AnalysisStatus.FAILED)
             recording.analysis_error = str(e)
             repository.update(recording)
+        return None
+
+
+@post_analysis_process()
+def analyze_local_recording_video(
+    db: Session,
+    org_id: int,
+    recording_id: int,
+    recording: Recording,
+    local_recording_path: str,
+    session: RRWebSessionUtils,
+) -> None:
+    """Analyzes a local video recording using VideoRecordingAnalyzerGraph."""
+    try:
+        repository = RecordingRepository(db)
+        issue_repository = IssueRepository(db)
+
+        # Get a fresh instance of the recording that's attached to the current session
+        recording = repository.get_by_id(recording_id, org_id)
+        if not recording:
+            logger.error(f"Recording {recording_id} not found during analysis.")
+            raise ValueError(f"Recording {recording_id} not found")
+
+        # Set initial progress if desired
+        # recording.analysis_progress = 10 # Example: Set to 10% before starting graph analysis
+        # repository.update(recording)
+
+        logger.info(
+            f"Starting video analysis for recording {recording_id} using VideoRecordingAnalyzerGraph."
+        )
+        video_graph = VideoRecordingAnalyzerGraph()
+        analysis_response = video_graph.analyze_recording(
+            org_id=str(org_id),  # Ensure org_id is string if required by graph
+            recording_id=str(recording_id),  # Ensure recording_id is string if required
+            recording_path=local_recording_path,
+        )
+
+        recording_analysis = analysis_response.get("recording_analysis")
+        if not recording_analysis:
+            raise ValueError(
+                "Video analysis graph did not return the expected 'recording_analysis' structure."
+            )
+
+        # Extract analyzed intervals and summary from the graph response
+        analyzed_intervals: List[RecordingInterval] = []
+        # The graph returns Pydantic models, convert them to SQLAlchemy models if necessary
+        # Assuming the structure matches:
+        for interval_data in recording_analysis.intervals:
+            # Convert TimestampDescription Pydantic models to JSON for storage,
+            # formatting the timestamp within each description from MM:SS to HH:MM:SS
+            processed_timestamp_descriptions_json = []
+            for ts_desc in interval_data.timestamp_descriptions:
+                try:
+                    # Parse MM:SS string to time object
+                    time_obj = datetime.strptime(ts_desc.timestamp, "%M:%S").time()
+                    # Format time object to HH:MM:SS string
+                    hhmmss_str = time_obj.strftime("%H:%M:%S")
+                    # Dump original object and update the timestamp
+                    ts_dict = ts_desc.model_dump()
+                    ts_dict['timestamp'] = hhmmss_str
+                    processed_timestamp_descriptions_json.append(ts_dict)
+                except ValueError:
+                    # Handle cases where the timestamp might not be in MM:SS format
+                    logger.warning(f"Could not parse timestamp '{ts_desc.timestamp}' for recording {recording_id}. Storing original.")
+                    processed_timestamp_descriptions_json.append(ts_desc.model_dump()) # Store original if parsing fails
+
+            # Convert MM:SS string from graph for start/end times to datetime.time object
+            try:
+                start_time_obj = datetime.strptime(interval_data.start_time, "%M:%S").time()
+            except ValueError:
+                 logger.warning(f"Could not parse start_time '{interval_data.start_time}' for recording {recording_id}. Defaulting to 00:00:00.")
+                 start_time_obj = time(0, 0, 0)
+            try:
+                end_time_obj = datetime.strptime(interval_data.end_time, "%M:%S").time()
+            except ValueError:
+                logger.warning(f"Could not parse end_time '{interval_data.end_time}' for recording {recording_id}. Defaulting to 00:00:00.")
+                end_time_obj = time(0, 0, 0)
+
+            analyzed_intervals.append(
+                RecordingInterval(
+                    recording_id=recording_id,
+                    start_time=start_time_obj, # Use converted time object
+                    end_time=end_time_obj,     # Use converted time object
+                    category=interval_data.category,
+                    issue=interval_data.issue,
+                    short_title=interval_data.short_title,
+                    timestamp_descriptions=processed_timestamp_descriptions_json, # Use processed JSON list
+                    description=interval_data.description,
+                )
+            )
+
+        recording_summary = recording_analysis.summary
+        # Assuming the graph summary is sufficient and we don't need a separate summarizer graph call
+        # If a specific title format is needed, derive it or adjust the graph prompt
+
+        logger.info(f"Video Analysis Summary: {recording_summary}")
+        logger.info(f"Video Analysis Short Title: {recording_analysis.title}")
+
+        # Persist intervals
+        has_intervals = (
+            recording_intervals_service.check_recording_intervals_with_recording_id(
+                db, recording_id
+            )
+        )
+        if has_intervals:
+            logger.info(f"Replacing existing intervals for recording {recording_id}")
+            recording_intervals_service.replace_recording_intervals(
+                db, recording_id, analyzed_intervals
+            )
+        else:
+            logger.info(f"Creating new intervals for recording {recording_id}")
+            # Need to get IDs back if process_issues relies on interval IDs
+            created_intervals = (
+                recording_intervals_service.batch_create_recording_intervals(
+                    db, analyzed_intervals
+                )
+            )
+            # Assign created IDs back to analyzed_intervals if needed for process_issues
+            # This depends on how batch_create returns IDs and if process_issues needs them.
+            # For simplicity, assuming process_issues can work without explicit interval IDs for now.
+            # If IDs are needed, adjust batch_create and the following process_issues call.
+
+        # Process issues based on analyzed intervals
+        if recording_has_issues(analyzed_intervals):
+            logger.info(f"Processing issues for recording {recording_id}")
+            # Ensure analyzed_intervals have IDs if process_issues requires them
+            process_issues(db, org_id, recording_id, analyzed_intervals)
+            issues = issue_repository.get_issues_by_recording(org_id, recording_id)
+            categories = [issue.category for issue in issues]
+            recording.tags = process_tags(categories)
+            logger.info(f"Issues processed for recording {recording_id}")
+        else:
+            logger.info(f"No issues found for recording {recording_id}")
+
+        # Update final recording state
+        recording.summary = recording_summary
+        recording.short_title = recording_analysis.title
+        recording.set_analysis_status(AnalysisStatus.COMPLETED)
+        recording.analysis_error = None
+        recording.analysis_progress = 100
+        # Potentially update file_duration if not already set and if determinable
+        if recording.file_duration is None:
+            try:
+                recording.file_duration = get_recording_duration(
+                    local_recording_path
+                )
+            except Exception as dur_err:
+                logger.warning(
+                    f"Could not determine duration for {local_recording_path}: {dur_err}"
+                )
+
+        repository.update(recording)
+
+        logger.info(f"Video analysis completed for recording {recording_id}")
+        return None
+
+    except Exception as e:
+        logger.error(
+            "Error analyzing video recording",
+            recording_id=recording_id,
+            error=str(e),
+            exc_info=True,
+        )
+        # Ensure repository is defined in exception block scope if needed
+        try:
+            recording_repo_on_error = RecordingRepository(db)
+            recording_on_error = recording_repo_on_error.get_by_id(
+                recording_id, org_id
+            )
+            if recording_on_error:
+                recording_on_error.set_analysis_status(AnalysisStatus.FAILED)
+                recording_on_error.analysis_error = str(e)
+                recording_repo_on_error.update(recording_on_error)
+        except Exception as update_err:
+            logger.error(
+                f"Failed to update recording status to FAILED for {recording_id}",
+                error=str(update_err),
+            )
         return None

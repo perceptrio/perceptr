@@ -1,14 +1,15 @@
-from typing_extensions import TypedDict
-from typing import Union
-from langgraph.graph import StateGraph, START, END
-from langchain_openai import ChatOpenAI
-from settings import settings
-from langchain_core.runnables import RunnableConfig
-from langchain_core.messages import SystemMessage, HumanMessage
-from langfuse.decorators import langfuse_context, observe
-from common.services.logger import logger
 import os
 import time
+from typing import Any, Dict, List, Union
+
+from common.services.logger import logger
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.runnables import RunnableConfig
+from langchain_openai import ChatOpenAI
+from langfuse.decorators import langfuse_context, observe
+from langgraph.graph import END, START, StateGraph
+from settings import settings
+from typing_extensions import TypedDict
 
 os.environ["LANGFUSE_PUBLIC_KEY"] = settings.LANGFUSE_PUBLIC_KEY
 os.environ["LANGFUSE_SECRET_KEY"] = settings.LANGFUSE_PRIVATE_KEY
@@ -57,11 +58,11 @@ class State(TypedDict):
 
 
 class IssuesSummarizerGraph:
-    def __init__(self):
+    def __init__(self) -> None:
         graph_builder = StateGraph(State)
         self.openai_llm = ChatOpenAI(
             api_key=settings.OPENAI_API_KEY,
-            model="gpt-4o",
+            model="gpt-4.1-mini",
             streaming=True,
             temperature=0,
         )
@@ -71,7 +72,6 @@ class IssuesSummarizerGraph:
         self.graph = graph_builder.compile()
 
     def issues_summarizer(self, state: State, config: RunnableConfig) -> dict:
-
         prompt = """You are a UI/UX Researcher analyzing a user session.
         You will be given two lists of issues.
         The first list is a list of issues that were found in the recording.
@@ -106,18 +106,17 @@ class IssuesSummarizerGraph:
 
         return {"aggregated_issues": response}
 
-    def get_graph(self):
+    def get_graph(self) -> StateGraph:
         return self.graph
 
-    @observe()
+    @observe()  # type: ignore[misc]
     def aggregate_issues(
         self,
         org_id: str,
         recording_id: str,
-        analyzed_recording_issues: list[dict],
-        existing_issues: list[dict],
-    ) -> dict:
-
+        analyzed_recording_issues: List[dict],
+        existing_issues: List[dict],
+    ) -> Dict[str, Any]:
         langfuse_context.update_current_trace(
             session_id=recording_id,
             user_id=org_id,
@@ -141,7 +140,7 @@ class IssuesSummarizerGraph:
                 config=config,
                 # debug=True
             )
-            return resp
+            return resp  # type: ignore[no-any-return]
         except Exception as e:
-            logger.error("Error creating graph with response", {"error": str(e)})
+            logger.error(f"Error creating graph with response error: {str(e)}")
             raise e
