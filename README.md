@@ -136,3 +136,14 @@ poetry run pre-commit install
 ```
 
 For more details, see [docs/linting.md](docs/linting.md).
+
+## AWS ECS
+we are using aws ecs to run the application. the ecs exec command is used to execute commands in the container. the logs command is used to view the logs of the container.
+
+Note: make sure you have the correct permissions to use the ecs exec command. and correct permissions to access the cluster.
+
+### aws ecs exec
+aws ecs execute-command --cluster perceptr-prod-cluster --task 4fb487f2141f4a4dbe36f4274c79ce9a --container api --command "alembic upgrade head" --interactive
+
+### aws ecs logs
+aws ecs logs --cluster perceptr-prod-cluster --task 4fb487f2141f4a4dbe36f4274c79ce9a --container api --since 1d

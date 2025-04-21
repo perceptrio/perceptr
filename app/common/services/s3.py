@@ -68,7 +68,11 @@ class S3Service:
             HTTPException: If content type is not an accepted image or video format
         """
         # Validate content type
-        if not (content_type.startswith("image/") or content_type.startswith("video/")):
+        if not (
+            content_type.startswith("image/")
+            or content_type.startswith("video/")
+            or content_type == "application/json"
+        ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Only image and video files are allowed",

@@ -24,6 +24,11 @@ def get_org_by_project_id(db: Session, project_id: str) -> Org:
     return org_service.get_org_by_project_id(db, project_id)
 
 
+def get_recording_by_session_id(db: Session, session_id: str) -> Recording:
+    """Get recording by session ID"""
+    return recording_service.get_recording_by_session_id(db, session_id)
+
+
 def _compress_jsonl(content: str) -> bytes:
     """Compress content using gzip"""
     compressed_content = io.BytesIO()
@@ -180,6 +185,17 @@ def _process_events_background(
                 recording_service.update_recording(db, recording)
         except Exception as inner_e:
             logger.error(f"Error updating recording status: {str(inner_e)}")
+
+
+def process_session(
+    db: Session,
+    org_id: int,
+    session_id: str,
+) -> dict:
+    """Process a session"""
+    # TODO: Implement this
+    print("Processing session", session_id)
+    return {"success": True, "message": "Events scheduled for processing"}
 
 
 def process_events(

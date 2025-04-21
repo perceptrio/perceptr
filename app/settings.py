@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     AWS_SECRET_ACCESS_KEY: Optional[str] = None
     AWS_REGION: str = "us-east-1"
     AWS_BUCKET_NAME: str = "perceptr-recordings-dev"
+    SQS_QUEUE_URL: str = ""  # Set this in your .env file
 
     # AI analysis settings
     AI_ANALYSIS_ENABLED: bool = False
