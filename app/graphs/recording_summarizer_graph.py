@@ -36,7 +36,7 @@ class RecordingSummarizerGraph:
         graph_builder = StateGraph(State)
         self.openai_llm = ChatOpenAI(
             api_key=settings.OPENAI_API_KEY,
-            model="gpt-4o",
+            model="gpt-4.1-mini",
             streaming=True,
             temperature=0,
         )

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, time
 from typing import Any, Callable, List, Optional, Tuple, TypeVar, cast
 
 import numpy as np
@@ -14,6 +14,7 @@ from fastapi import HTTPException, status
 from graphs.issues_summarizer_graph import IssuesSummarizerGraph
 from graphs.recording_analyzer_graph import RecordingAnalyzerGraph
 from graphs.recording_summarizer_graph import RecordingSummarizerGraph
+from graphs.video_recording_analyzer_graph import VideoRecordingAnalyzerGraph
 from models.issue import Issue
 from models.issue_recording import IssueRecording
 from models.recording import Recording
@@ -762,4 +763,182 @@ def analyze_local_recording(
             recording.set_analysis_status(AnalysisStatus.FAILED)
             recording.analysis_error = str(e)
             repository.update(recording)
+        return None
+
+
+@post_analysis_process()
+def analyze_local_recording_video(
+    db: Session,
+    org_id: int,
+    recording_id: int,
+    recording: Recording,
+    local_recording_path: str,
+    session: RRWebSessionUtils,
+) -> None:
+    """Analyzes a local video recording using VideoRecordingAnalyzerGraph."""
+    try:
+        repository = RecordingRepository(db)
+        issue_repository = IssueRepository(db)
+
+        # Get a fresh instance of the recording that's attached to the current session
+        recording = repository.get_by_id(recording_id, org_id)
+        if not recording:
+            logger.error(f"Recording {recording_id} not found during analysis.")
+            raise ValueError(f"Recording {recording_id} not found")
+
+        # Set initial progress if desired
+        # recording.analysis_progress = 10 # Example: Set to 10% before starting graph analysis
+        # repository.update(recording)
+
+        logger.info(
+            f"Starting video analysis for recording {recording_id} using VideoRecordingAnalyzerGraph."
+        )
+        video_graph = VideoRecordingAnalyzerGraph()
+        analysis_response = video_graph.analyze_recording(
+            org_id=str(org_id),  # Ensure org_id is string if required by graph
+            recording_id=str(recording_id),  # Ensure recording_id is string if required
+            recording_path=local_recording_path,
+        )
+
+        recording_analysis = analysis_response.get("recording_analysis")
+        if not recording_analysis:
+            raise ValueError(
+                "Video analysis graph did not return the expected 'recording_analysis' structure."
+            )
+
+        # Extract analyzed intervals and summary from the graph response
+        analyzed_intervals: List[RecordingInterval] = []
+        # The graph returns Pydantic models, convert them to SQLAlchemy models if necessary
+        # Assuming the structure matches:
+        for interval_data in recording_analysis.intervals:
+            # Convert TimestampDescription Pydantic models to JSON for storage,
+            # formatting the timestamp within each description from MM:SS to HH:MM:SS
+            processed_timestamp_descriptions_json = []
+            for ts_desc in interval_data.timestamp_descriptions:
+                try:
+                    # Parse MM:SS string to time object
+                    time_obj = datetime.strptime(ts_desc.timestamp, "%M:%S").time()
+                    # Format time object to HH:MM:SS string
+                    hhmmss_str = time_obj.strftime("%H:%M:%S")
+                    # Dump original object and update the timestamp
+                    ts_dict = ts_desc.model_dump()
+                    ts_dict['timestamp'] = hhmmss_str
+                    processed_timestamp_descriptions_json.append(ts_dict)
+                except ValueError:
+                    # Handle cases where the timestamp might not be in MM:SS format
+                    logger.warning(f"Could not parse timestamp '{ts_desc.timestamp}' for recording {recording_id}. Storing original.")
+                    processed_timestamp_descriptions_json.append(ts_desc.model_dump()) # Store original if parsing fails
+
+            # Convert MM:SS string from graph for start/end times to datetime.time object
+            try:
+                start_time_obj = datetime.strptime(interval_data.start_time, "%M:%S").time()
+            except ValueError:
+                 logger.warning(f"Could not parse start_time '{interval_data.start_time}' for recording {recording_id}. Defaulting to 00:00:00.")
+                 start_time_obj = time(0, 0, 0)
+            try:
+                end_time_obj = datetime.strptime(interval_data.end_time, "%M:%S").time()
+            except ValueError:
+                logger.warning(f"Could not parse end_time '{interval_data.end_time}' for recording {recording_id}. Defaulting to 00:00:00.")
+                end_time_obj = time(0, 0, 0)
+
+            analyzed_intervals.append(
+                RecordingInterval(
+                    recording_id=recording_id,
+                    start_time=start_time_obj, # Use converted time object
+                    end_time=end_time_obj,     # Use converted time object
+                    category=interval_data.category,
+                    issue=interval_data.issue,
+                    short_title=interval_data.short_title,
+                    timestamp_descriptions=processed_timestamp_descriptions_json, # Use processed JSON list
+                    description=interval_data.description,
+                )
+            )
+
+        recording_summary = recording_analysis.summary
+        # Assuming the graph summary is sufficient and we don't need a separate summarizer graph call
+        # If a specific title format is needed, derive it or adjust the graph prompt
+
+        logger.info(f"Video Analysis Summary: {recording_summary}")
+        logger.info(f"Video Analysis Short Title: {recording_analysis.title}")
+
+        # Persist intervals
+        has_intervals = (
+            recording_intervals_service.check_recording_intervals_with_recording_id(
+                db, recording_id
+            )
+        )
+        if has_intervals:
+            logger.info(f"Replacing existing intervals for recording {recording_id}")
+            recording_intervals_service.replace_recording_intervals(
+                db, recording_id, analyzed_intervals
+            )
+        else:
+            logger.info(f"Creating new intervals for recording {recording_id}")
+            # Need to get IDs back if process_issues relies on interval IDs
+            created_intervals = (
+                recording_intervals_service.batch_create_recording_intervals(
+                    db, analyzed_intervals
+                )
+            )
+            # Assign created IDs back to analyzed_intervals if needed for process_issues
+            # This depends on how batch_create returns IDs and if process_issues needs them.
+            # For simplicity, assuming process_issues can work without explicit interval IDs for now.
+            # If IDs are needed, adjust batch_create and the following process_issues call.
+
+        # Process issues based on analyzed intervals
+        if recording_has_issues(analyzed_intervals):
+            logger.info(f"Processing issues for recording {recording_id}")
+            # Ensure analyzed_intervals have IDs if process_issues requires them
+            process_issues(db, org_id, recording_id, analyzed_intervals)
+            issues = issue_repository.get_issues_by_recording(org_id, recording_id)
+            categories = [issue.category for issue in issues]
+            recording.tags = process_tags(categories)
+            logger.info(f"Issues processed for recording {recording_id}")
+        else:
+            logger.info(f"No issues found for recording {recording_id}")
+
+        # Update final recording state
+        recording.summary = recording_summary
+        recording.short_title = recording_analysis.title
+        recording.set_analysis_status(AnalysisStatus.COMPLETED)
+        recording.analysis_error = None
+        recording.analysis_progress = 100
+        # Potentially update file_duration if not already set and if determinable
+        if recording.file_duration is None:
+            try:
+                recording.file_duration = get_recording_duration(
+                    local_recording_path
+                )
+            except Exception as dur_err:
+                logger.warning(
+                    f"Could not determine duration for {local_recording_path}: {dur_err}"
+                )
+
+        repository.update(recording)
+
+        logger.info(f"Video analysis completed for recording {recording_id}")
+        return None
+
+    except Exception as e:
+        logger.error(
+            "Error analyzing video recording",
+            recording_id=recording_id,
+            error=str(e),
+            exc_info=True,
+        )
+        # Ensure repository is defined in exception block scope if needed
+        try:
+            recording_repo_on_error = RecordingRepository(db)
+            recording_on_error = recording_repo_on_error.get_by_id(
+                recording_id, org_id
+            )
+            if recording_on_error:
+                recording_on_error.set_analysis_status(AnalysisStatus.FAILED)
+                recording_on_error.analysis_error = str(e)
+                recording_repo_on_error.update(recording_on_error)
+        except Exception as update_err:
+            logger.error(
+                f"Failed to update recording status to FAILED for {recording_id}",
+                error=str(update_err),
+            )
         return None

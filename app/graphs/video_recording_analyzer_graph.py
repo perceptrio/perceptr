@@ -22,6 +22,8 @@ import numpy as np
 from pydantic import BaseModel, Field
 from utils.graph import map_timestamped_frames_to_messages
 
+from google import genai
+
 
 class TimestampDescription(BaseModel):
     """A timestamp in the recording. Use the timestamp to describe the user's actions. Don't miss any timestamp."""
@@ -33,7 +35,7 @@ class TimestampDescription(BaseModel):
         description="Observations and recommendations focused solely on the UI elements and overall visual design of the screenshot. Assess aspects such as layout, alignment, color contrast, typography, spacing, and responsiveness. Note any areas where the design could be optimized, improved, or clarified. If no visual feedback is required, leave this field empty. No need for positive feedback, only feedback on what could be improved."
     )
     timestamp: str = Field(
-        description="The timestamp in the recording. Format: HH:MM:SS"
+        description="The timestamp in the recording. Format: MM:SS"
     )
 
 
@@ -47,10 +49,10 @@ class TimestampInterval(BaseModel):
     """A timestamp interval in the recording."""
 
     start_time: str = Field(
-        description="The start time of the interval in the recording. Format: HH:MM:SS"
+        description="The start time of the interval in the recording. Format: MM:SS"
     )
     end_time: str = Field(
-        description="The end time of the interval in the recording. Format: HH:MM:SS"
+        description="The end time of the interval in the recording. Format: MM:SS"
     )
     description: str = Field(
         description="A detailed description of the user's actions in the interval."
@@ -76,14 +78,17 @@ class RecordingAnalysis(BaseModel):
     summary: str = Field(
         description="A summary of the user's actions, behavior, emotional state. Also include any issues found in the recording and recommendations for improvement."
     )
+    title: str = Field(
+        description="A title for the recording. It should be a short description of the user's actions, behavior, emotional state."
+    )
 
 
 class State(TypedDict):
-    timestamped_frames: List[Tuple[str, np.ndarray, str]]
+    recording_path: str
     recording_analysis: RecordingAnalysis
 
 
-class RecordingAnalyzerGraph:
+class VideoRecordingAnalyzerGraph:
     def __init__(self) -> None:
         graph_builder = StateGraph(State)
         self.openai_llm = ChatOpenAI(
@@ -95,11 +100,15 @@ class RecordingAnalyzerGraph:
         self.gemini_llm = ChatGoogleGenerativeAI(
             api_key=settings.GEMINI_API_KEY,
             # model="gemini-2.5-pro-exp-03-25",
-            model="gemini-2.0-flash",
+            model="gemini-2.5-flash-preview-04-17",
+            # model="gemini-2.0-flash",
             streaming=True,
             temperature=0,
         )
-
+        # Configure genai client for file uploads
+        # genai.configure(api_key=settings.GEMINI_API_KEY)
+        self.gemini_client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        
         graph_builder.add_node("recording_analyzer", self.recording_analyzer)
 
         graph_builder.add_edge(START, "recording_analyzer")
@@ -152,14 +161,66 @@ class RecordingAnalyzerGraph:
 
     #     return response
 
-    def openai_recording_analyzer(
-        self, timestamped_frames: List[Tuple[str, np.ndarray, str]]
+    def gemini_recording_analyzer(
+        self, recording_path: str
     ) -> RecordingAnalysis:
+        
+        # --- Upload video using File API ---
+        logger.info(f"Uploading video file: {recording_path} using File API...")
+        # Consider adding error handling for file not found
+        try:
+            uploaded_file = self.gemini_client.files.upload(file=recording_path)
+            logger.info(f"File uploaded successfully: {uploaded_file.uri}, Name: {uploaded_file.name}")
+
+            # Wait for the file to be processed
+            while uploaded_file.state.name == "PROCESSING":
+                logger.info("Waiting for video processing...")
+                time.sleep(10) # Adjust sleep time as needed
+                # Fetch the latest file state
+                uploaded_file = self.gemini_client.files.get(name=uploaded_file.name)
+
+
+            if uploaded_file.state.name == "FAILED":
+                logger.error(f"Video file processing failed: {uploaded_file.name}")
+                raise ValueError(f"Video processing failed for file: {uploaded_file.name}")
+
+            logger.info(f"Video file ready: {uploaded_file.uri}")
+            
+            # Ensure correct mime_type is used - get it from the uploaded file object
+            mime_type = uploaded_file.mime_type 
+            file_uri = uploaded_file.uri
+
+        except Exception as e:
+            logger.error(f"Error during video upload or processing: {e}", exc_info=True)
+            # Consider how to handle this - maybe raise a specific exception
+            # For now, re-raising the original exception
+            raise e
+        # --- End File API Upload ---
+
         # Create the prompt.
         prompt = """
-You are an expert UI/UX Researcher analyzing a user session. You are given a list of timestamps along with an image of the user's screen at each timestamp and an RRWeb summary of the event at each timestamp. Your task is to analyze the recording and provide a detailed, grouped, timestamped analysis of the user's actions, behavior, and any UI issues observed. **Group consecutive timestamps that represent similar or related actions into a single interval.** Each interval should capture a single action or a set of related actions.
+You are a highly skilled UX Analyst AI. Your task is to analyze video recordings of user sessions provided as a sequence of timestamped frames or descriptions. Your goal is to meticulously observe user actions, identify any issues (bugs, usability problems, performance lags, potential enhancements), and evaluate the UI design at each step.
 
-**For each interval, include:**
+**Input:**
+You will receive data representing a user session recording, likely as a series of screenshots or frames, each associated with a timestamp.
+
+**Core Task:**
+1.  **Analyze Sequentially:** Process the timestamps in chronological order.
+2.  **Identify User Actions:** Determine what the user is doing at each timestamp (e.g., clicking a button, scrolling, typing text, navigating between pages, waiting).
+3.  **Observe System Responses:** Note how the system reacts (e.g., loading indicators, page changes, error messages, successful operations).
+4.  **Detect Issues:** Identify any problems the user encounters or that are apparent from the recording:
+    *   **Bugs:** Functionality not working as expected, errors, crashes.
+    *   **Usability Issues:** Points of confusion, unexpected behavior, inefficient workflows, difficulty finding information, unclear labels/instructions.
+    *   **Performance Issues:** Noticeable delays in loading or responsiveness. Specifically flag delays **exceeding 3 seconds** as `PERFORMANCE_ISSUE`.
+    *   **Enhancements:** Observe situations where a feature could be improved or a new feature could significantly help the user's workflow, even if no explicit issue occurred.
+5.  **Evaluate UI Design:** At each timestamp, critically assess the visual presentation (layout, spacing, alignment, contrast, typography, visual hierarchy, clarity of elements). Focus *only* on constructive feedback for improvement.
+6.  **Group into Intervals:** Group consecutive timestamps that represent a single, logical user sub-task or interaction flow (e.g., logging in, filling out a form section, attempting a search).
+7.  **Generate Structured Output:** For each logical interval identified, format your analysis precisely according to the structure below.
+
+**Output Structure:**
+
+Provide your analysis as a list of interval objects. Each interval object must contain the following fields:
+
 - **Start Time:** The first timestamp in the group.
 - **End Time:** The last timestamp in the group.
 - **Detailed Description:** A clear description of the user's actions and observations during the interval.
@@ -175,119 +236,75 @@ You are an expert UI/UX Researcher analyzing a user session. You are given a lis
 - **Timestamp Descriptions:** A list of timestamp descriptions for every timestamp included in the interval. Contains the following fields:
     - **Description:** A detailed description of the user's actions and observations during the interval.
     - **UI Design Feedback:** Observations and recommendations focused solely on the UI elements and overall visual design of the screenshot. Assess aspects such as layout, alignment, color contrast, typography, spacing, and responsiveness. Note any areas where the design could be optimized, improved, or clarified. If no visual feedback is required, leave this field empty. No need for positive feedback, only feedback on what could be improved.
-    - **Timestamp:** The timestamp in the recording. Format: HH:MM:SS
+    - **Timestamp:** The timestamp in the recording. Format: MM:SS
 
 
-**Focus Areas:**
-1. **User Behavior & Interaction:**
-   - Identify signs of user frustration (e.g., rapid or repeated clicks, hesitations, or abrupt movements).
-   - Examine navigation patterns, particularly moments of hesitation or repeated attempts.
-   - Highlight any moments where the user appears confused or stuck.
+    
+**Category Definitions & Rules:**
 
-2. **Interaction with UI Elements:**
-   - Assess how users interact with buttons, menus, forms, and other interactive elements.
-   - Detect if UI elements (e.g., buttons, links, icons) are unresponsive, misplaced, or unclear.
-   - Note if tooltips, modals, or error messages appear and whether they aid or confuse the user.
+- **BUG:** Use when functionality is broken, an error occurs, or the system behaves in a way that prevents task completion correctly. High impact.
 
-3. **Layout & Visual Design:**
-   - Evaluate the consistency of the layout, including alignment, spacing, and visual hierarchy.
-   - Look for issues with readability, such as poor contrast between text and background.
-   - Identify visual clutter, overlapping elements, or design elements that might cause confusion.
+- **USABILITY_ISSUE:** Use when the user struggles, seems confused, takes inefficient paths, or encounters friction due to the design or workflow, but the core functionality might still work (perhaps with difficulty).
 
-4. **Accessibility:**
-   - Check if UI elements are accessible (e.g., adequate size for click/tap, keyboard navigation support).
-   - Assess whether error messages and labels are clear and assistive.
-   - Note any potential barriers for users with visual or motor impairments.
+- **PERFORMANCE_ISSUE:** Use only when there is a clear visual indication of loading or unresponsiveness that lasts longer than 3 seconds. Do not use for normal user thinking time.
 
-5. **Performance & Responsiveness:**
-   - Observe any lag, slow load times, or sudden reflows of the UI.
-   - Identify any elements that are unresponsive or cause delays in the user's workflow.
+- **ENHANCEMENT:** Use when you identify an opportunity to improve the existing UI/UX or suggest a new feature based on the user's interaction, even if no explicit "issue" occurred. This often relates to making tasks easier or more efficient.
 
-6. **Error Handling & Feedback:**
-   - Document any bugs or errors that occur and how the UI communicates them.
-   - Note if error messages or feedback mechanisms are helpful and clear.
+- **NORMAL:** Use only when the user performs routine actions smoothly without any detectable issues or clear enhancement opportunities within the interval.
 
-7. **Opportunities for Enhancement:**
-   - Suggest improvements for usability and overall design.
-   - Recommend new features or refinements that could streamline user interactions.
-   - Provide actionable insights to improve the user experience (e.g., "Increase button size for better touch targets," "Improve color contrast for readability").
+**Override Rule:** If any issue (BUG, USABILITY_ISSUE, PERFORMANCE_ISSUE) is detected within an interval, the category cannot be NORMAL. If an ENHANCEMENT is suggested but no specific issue is present, use ENHANCEMENT, not NORMAL. Prioritize BUG > USABILITY_ISSUE > PERFORMANCE_ISSUE > ENHANCEMENT > NORMAL.
 
-**Instructions:**
 
-- **Grouping:**
-  - **Group consecutive timestamps** that reflect a single action or a set of related actions into one interval.
-  - If a timestamp clearly represents a distinct action not related to its neighbors, it should start a new interval.
+**Important Considerations:**
 
-- **Comprehensiveness:**
-  - Ensure that every provided timestamp is included in the analysis either as its own interval or as part of a grouped interval.
-  - Provide both macro-level (overall session behavior) and micro-level (detailed UI element interactions) insights.
+- Focus on Observation: Base your analysis strictly on what is visible in the recording. Infer user intent cautiously based on their actions.
 
-- **Clarity:**
-  - Use clear, concise language. Reference specific timestamps, UI elements, and user behaviors.
+- Be Specific: Descriptions and issue details should be clear and actionable. Avoid vague language.
 
-- **Actionable Insights:**
-  - Provide concrete recommendations for each identified issue, prioritizing bugs and usability issues over normal interactions.
+- UI Feedback Focus: Remember, UI Design Feedback is only about visual design elements and layout improvements. Functional issues go into the main Issue field. Do not provide positive UI feedback, only constructive criticism.
 
-- **Final Check:**
-  - Before finalizing your analysis, verify that every provided timestamp is included in the output and appropriately grouped into intervals based on similarity of actions.
+- Interval Logic: Group timestamps logically based on the user completing a small, coherent part of their overall task. Intervals can vary in duration.
+
+- Timestamp Granularity: Ensure each entry in Timestamp Descriptions corresponds to a distinct moment/frame provided in the input.
+
+Now, please analyze the provided user session recording data and generate the structured output as defined above.
 
                     """
 
+        # Construct message using file_uri from File API
         messages = [
-            SystemMessage(content=prompt),
-            *map_timestamped_frames_to_messages(timestamped_frames),
+            HumanMessage(content=[
+                {
+                    "type": "media",
+                    "mime_type": mime_type, 
+                    "file_uri": file_uri # Use file_uri instead of data
+                },
+                {
+                    "type": "text",
+                    "text": prompt
+                }
+            ])
         ]
+        try:
+            response = self.gemini_llm.with_structured_output(RecordingAnalysis).invoke(messages)
+        finally:
+            # Clean up the uploaded file on Google Cloud Storage
+            # Optional: Keep if you might reuse the file quickly, but generally good to clean up.
+            try:
+                 logger.info(f"Deleting uploaded file: {uploaded_file.name}")
+                 self.gemini_client.files.delete(name=uploaded_file.name)
+            except Exception as delete_error:
+                 logger.warning(f"Failed to delete uploaded file {uploaded_file.name}: {delete_error}")
 
-        response = self.openai_llm.with_structured_output(RecordingAnalysis).invoke(
-            messages
-        )
         return response  # type: ignore[no-any-return]
 
     def recording_analyzer(self, state: State, config: RunnableConfig) -> dict:
-        timestamped_frames = state["timestamped_frames"]
-        response = self.openai_recording_analyzer(timestamped_frames)
+        recording_path = state["recording_path"]
+        response = self.gemini_recording_analyzer(recording_path)
 
         return {"recording_analysis": response}
 
-    # def extract_timestamped_intervals(self, state: State) -> dict:
-    #     recording_analysis = state["recording_analysis"]
-
-    #     prompt = """
-    #     You are an expert UI/UX Researcher analyzing a user session.
-
-    #     You are given a list of timestamps along with a description of the user's actions at each timestamp.
-
-    #     Your task is to group the timestamps into intervals based on the user's actions.
-
-    #     Each interval should be a single action or a set of actions that are related to each other.
-
-    #     The intervals should be grouped into categories based on the user's actions.
-
-    #     The categories are:
-
-    #     NORMAL: The user is performing their normal actions.
-
-    #     BUG: Issues that significantly impact functionality and need immediate resolution.
-
-    #     USABILITY_ISSUE: Problems that hinder user experience but don't necessarily break functionality.
-
-    #     PERFORMANCE_ISSUE: Concerns related to speed, load times, or responsiveness.
-
-    #     ENHANCEMENT: Suggestions for improvements or new features that could enhance user experience.
-
-    #     If any issue is found, it takes priority over the NORMAL category.
-    #                 """
-
-    #     messages = [
-    #         SystemMessage(content=prompt),
-    #         HumanMessage(content=recording_analysis.json())
-    #     ]
-
-    #     response = self.openai_llm.with_structured_output(RecordingIntervals).invoke(messages)
-
-    #     return {
-    #         "recording_intervals": response
-    #     }
+   
 
     def get_graph(self) -> StateGraph:
         return self.graph
@@ -297,7 +314,7 @@ You are an expert UI/UX Researcher analyzing a user session. You are given a lis
         self,
         org_id: str,
         recording_id: str,
-        timestamped_frames: List[Tuple[str, np.ndarray, str]],
+        recording_path: str,
     ) -> Dict[str, Any]:
         langfuse_context.update_current_trace(
             session_id=recording_id,
@@ -316,7 +333,7 @@ You are an expert UI/UX Researcher analyzing a user session. You are given a lis
         }
         try:
             resp = self.graph.invoke(
-                {"timestamped_frames": timestamped_frames},
+                {"recording_path": recording_path},
                 config=config,
                 # debug=True
             )
