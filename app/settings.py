@@ -5,6 +5,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # OpenAI and LangFuse settings
+    BREVO_API_KEY: str
     OPENAI_API_KEY: str
     GEMINI_API_KEY: str
     LANGFUSE_PUBLIC_KEY: str

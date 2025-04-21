@@ -1,4 +1,4 @@
-FROM python:3.13
+FROM python:3.12.10
 
 # Install Node.js and npm
 RUN apt-get update && apt-get install -y \
