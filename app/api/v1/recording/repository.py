@@ -37,8 +37,8 @@ class RecordingRepository:
         if search:
             query = query.filter(
                 (Recording.file_name.ilike(f"%{search}%"))
-                | (Recording.short_title.ilike(f"%{search}%"))
-                | (Recording.summary.ilike(f"%{search}%"))
+                | (Recording.short_title.ilike(f"%{search.lower()}%"))
+                | (Recording.summary.ilike(f"%{search.lower()}%"))
             )
         if start_date:
             query = query.filter(Recording.created_at >= start_date)

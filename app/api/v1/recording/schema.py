@@ -1,6 +1,7 @@
 from datetime import datetime
+
+from common.enums import AnalysisStatus, RecordingType, VideoType
 from pydantic import BaseModel, field_validator
-from common.enums import RecordingType, VideoType, AnalysisStatus
 
 
 class RecordingUploadUrl(BaseModel):
@@ -38,6 +39,7 @@ class RecordingCreate(BaseModel):
     client_data: dict | None = None
     meta_data: dict | None = None
 
+
 class RecordingCreateForUpload(BaseModel):
     file_name: str  # key of file in s3
     file_size: int
@@ -56,6 +58,7 @@ class DeleteFileBody(BaseModel):
 
 class RecordingResponse(RecordingCreateForUpload):
     id: int
+    session_id: str | None
     file_duration: float | None
     org_id: int
     created_at: datetime

@@ -1,17 +1,19 @@
-from fastapi import HTTPException, status
-from sqlalchemy.orm import Session
-from models.issue import Issue
-from .schema import (
-    IssueCreate,
-    IssueUpdate,
-    IssueResponse,
-    RecordingIntervalInfo,
-    IssueWithIntervalsResponse,
-)
-from .repository import IssueRepository
+from datetime import datetime
+
 from api.v1.org import service as org_service
 from common.enums import IntervalCategory
-from datetime import datetime
+from fastapi import HTTPException, status
+from models.issue import Issue
+from sqlalchemy.orm import Session
+
+from .repository import IssueRepository
+from .schema import (
+    IssueCreate,
+    IssueResponse,
+    IssueUpdate,
+    IssueWithIntervalsResponse,
+    RecordingIntervalInfo,
+)
 
 
 def create_issue(db: Session, org_id: int, issue_data: IssueCreate) -> Issue:
@@ -58,6 +60,7 @@ def get_issue(
                 recording_duration=recording.file_duration,
                 recording_created_at=recording.created_at,
                 recording_id=recording.id,
+                recording_session_id=recording.session_id,
                 recording_title=recording.short_title,
                 recording_summary=recording.summary,
                 interval_id=interval.id,

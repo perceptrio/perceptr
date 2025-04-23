@@ -1,7 +1,8 @@
 from datetime import datetime, time
-from pydantic import BaseModel
-from common.enums import IntervalCategory
 from typing import Optional
+
+from common.enums import IntervalCategory
+from pydantic import BaseModel
 
 
 class IssueBase(BaseModel):
@@ -27,6 +28,7 @@ class IssueUpdate(BaseModel):
 
 class RecordingIntervalInfo(BaseModel):
     recording_id: int
+    recording_session_id: str | None
     recording_file_size: int
     recording_duration: float
     recording_created_at: datetime
