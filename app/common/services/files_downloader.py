@@ -21,6 +21,16 @@ class FilesDownloader:
         self.s3_client.download_file(self.bucket_name, key, local_file_path)
         logger.info(f"Downloaded {key} to {local_file_path}")
         return local_file_path
+    
+    def download_all_session_batches(self, key: str) -> list[str]:
+        local_file_paths = []
+        for obj in self.s3_client.list_objects_v2(Bucket=self.bucket_name, Prefix=key)['Contents']:
+            filename = os.path.basename(obj['Key'])
+            if filename.startswith("batch_"):
+                local_file_path = os.path.join(self.temp_dir, filename)
+                self.s3_client.download_file(self.bucket_name, obj['Key'], local_file_path)
+                local_file_paths.append(local_file_path)
+        return local_file_paths
 
     def get_local_temp_dir(self) -> str:
         return self.temp_dir

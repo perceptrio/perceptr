@@ -14,7 +14,7 @@ from models.org import Org
 from models.recording import Recording
 from settings import settings
 from sqlalchemy.orm import Session
-from utils.rrweb import RRWebSessionUtils
+from utils.rrweb import RRWebSessionUtils, merge_rrweb_batches
 
 from .schema import SnapshotBuffer
 
@@ -24,9 +24,9 @@ def get_org_by_project_id(db: Session, project_id: str) -> Org:
     return org_service.get_org_by_project_id(db, project_id)
 
 
-def get_recording_by_session_id(db: Session, session_id: str) -> Recording:
+def get_recording_by_session_id(db: Session, org_id: int, session_id: str) -> Recording:
     """Get recording by session ID"""
-    return recording_service.get_recording_by_session_id(db, session_id)
+    return recording_service.get_recording_by_session_id(session_id=session_id, org_id=org_id, db=db)
 
 
 def _compress_jsonl(content: str) -> bytes:
@@ -186,16 +186,99 @@ def _process_events_background(
         except Exception as inner_e:
             logger.error(f"Error updating recording status: {str(inner_e)}")
 
+def _create_recording_from_session(db: Session, org_id: int, session_id: str) -> Recording:
+    """Create a recording from a session"""
+    recording = RecordingCreate(
+        org_id=org_id,
+        session_id=session_id,
+        file_name=f"{session_id}/events.json",
+        file_type=VideoType.JSON.value,
+        file_size=0,
+        analysis_status=AnalysisStatus.IN_PROGRESS.value,
+    )
+    return recording_service.create_recording(db, recording)
+
+def _process_session_background(
+    db: Session,
+    org_id: int,
+    session_id: str,
+    recording: Recording,
+) -> None:
+    """Background task to process a session"""
+
+    try:
+        logger.info(f"Processing session {session_id}")
+
+        # Download the session batches
+        with FilesDownloader(s3_service.get_s3_client(), keep_temp_dir=False) as downloader:
+            session_prefix = f"{org_id}/{session_id}/"
+            local_file_paths = downloader.download_all_session_batches(session_prefix)
+            logger.info(f"Downloaded {len(local_file_paths)} files for session {session_id}")
+            # Process the files
+
+            merged_file_path = merge_rrweb_batches(local_file_paths)
+            logger.info(f"Merged file saved to {merged_file_path}")
+
+            session = RRWebSessionUtils(merged_file_path)
+
+            # Print session summary
+            logger.info(session.get_session_summary())
+            logger.info(f"Start time: {session.get_start_time()}")
+            logger.info(f"End time: {session.get_end_time()}")
+            duration = session.get_duration()
+            logger.info(f"Duration: {duration}")
+            logger.info(f"Events: {len(session.get_events())}")
+            logger.info(f"User identity: {session.get_user_identity()}")
+
+            # Skip sessions with 0 duration
+            if duration == "00:00:00":
+                logger.info(f"Skipping analysis for session {session_id} with 0 duration")
+                return
+
+            # Convert to video
+            logger.info("\nConverting session to video...")
+            result = session.convert_events_to_video()
+
+            if result["success"]:
+                logger.info(f"Video saved to: {result['output_path']}")
+                if settings.AI_ANALYSIS_ENABLED:
+                    recording_service.analyze_local_recording_video(
+                        db, org_id, recording.id, recording, result["output_path"], session
+                    )
+                else:
+                    logger.info("AI analysis is disabled, skipping analysis")
+            else:
+                logger.error("\nVideo conversion failed!")
+                if "error" in result:
+                    logger.error(f"Error: {result['error']}")
+                else:
+                    logger.error(f"Message: {result['message']}")
+    except Exception as e:
+        logger.error(f"Error processing session {session_id}: {str(e)}")
+        recording.analysis_status = AnalysisStatus.FAILED.value
+        recording.analysis_error = str(e)
+        recording_service.update_recording(db, recording)
+
 
 def process_session(
     db: Session,
     org_id: int,
     session_id: str,
+    background_tasks: BackgroundTasks,
 ) -> dict:
     """Process a session"""
     # TODO: Implement this
     print("Processing session", session_id)
-    return {"success": True, "message": "Events scheduled for processing"}
+    recording = _create_recording_from_session(db, org_id, session_id)
+    background_tasks.add_task(
+        _process_session_background,
+        db,
+        org_id,
+        session_id,
+        recording,
+    )
+
+    return {"success": True, "message": "Session scheduled for processing"}
 
 
 def process_events(
