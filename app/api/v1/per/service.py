@@ -219,6 +219,11 @@ def _process_session_background(
             merged_file_path = merge_rrweb_batches(local_file_paths)
             logger.info(f"Merged file saved to {merged_file_path}")
 
+            # Upload the merged file to S3
+            s3_path = f"{org_id}/{session_id}/events.json"
+            with open(merged_file_path, "rb") as f:
+                s3_service.upload_file(s3_path, f.read())
+
             session = RRWebSessionUtils(merged_file_path)
 
             # Print session summary
@@ -253,6 +258,7 @@ def _process_session_background(
                     logger.error(f"Error: {result['error']}")
                 else:
                     logger.error(f"Message: {result['message']}")
+            
     except Exception as e:
         logger.error(f"Error processing session {session_id}: {str(e)}")
         recording.analysis_status = AnalysisStatus.FAILED.value
