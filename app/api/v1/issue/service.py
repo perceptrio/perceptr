@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from api.v1.org import service as org_service
-from common.enums import IntervalCategory
+from common.enums import IntervalCategory, IntervalSeverity, IssueSortBy
 from fastapi import HTTPException, status
 from models.issue import Issue
 from sqlalchemy.orm import Session
@@ -83,9 +83,11 @@ def get_issues(
     org_id: int,
     skip: int = 0,
     limit: int = 100,
+    sort_by: IssueSortBy = IssueSortBy.LATEST,
     search: str = None,
     is_resolved: bool = None,
-    category: IntervalCategory = None,
+    categories: list[IntervalCategory] = None,
+    severities: list[IntervalSeverity] = None,
     start_date: datetime = None,
     end_date: datetime = None,
 ) -> list[IssueResponse]:
@@ -94,9 +96,11 @@ def get_issues(
         org_id,
         skip,
         limit,
+        sort_by,
         search,
         is_resolved,
-        category.value if category else None,
+        categories,
+        severities,
         start_date,
         end_date,
     )

@@ -1,10 +1,12 @@
 from datetime import datetime
-from sqlalchemy.orm import Session
+
+from common.enums import IntervalCategory, IntervalSeverity, IssueSortBy
 from models.issue import Issue
 from models.issue_recording import IssueRecording
 from models.recording import Recording
 from models.recording_interval import RecordingInterval
 from sqlalchemy import and_, func
+from sqlalchemy.orm import Session
 
 
 class IssueRepository:
@@ -29,9 +31,11 @@ class IssueRepository:
         org_id: int,
         skip: int = 0,
         limit: int = 100,
+        sort_by: IssueSortBy = IssueSortBy.LATEST,
         search: str = None,
         is_resolved: bool = None,
-        category: str = None,
+        categories: list[IntervalCategory] = None,
+        severities: list[IntervalSeverity] = None,
         start_date: datetime = None,
         end_date: datetime = None,
     ) -> list[Issue]:
@@ -56,14 +60,30 @@ class IssueRepository:
                 Issue.title.ilike(search) | Issue.description.ilike(search)
             )
 
-        if category:
-            query = query.filter(Issue.category == category)
+        if categories is not None:
+            query = query.filter(
+                Issue.category.in_([category.value for category in categories])
+            )
+
+        if severities is not None:
+            query = query.filter(
+                Issue.severity.in_([severity.value for severity in severities])
+            )
 
         if start_date:
             query = query.filter(Issue.created_at >= start_date)
 
         if end_date:
             query = query.filter(Issue.created_at <= end_date)
+
+        if sort_by.value == IssueSortBy.LATEST.value:
+            query = query.order_by(Issue.created_at.desc())
+        elif sort_by.value == IssueSortBy.OLDEST.value:
+            query = query.order_by(Issue.created_at.asc())
+        elif sort_by.value == IssueSortBy.MOST_AFFECTED.value:
+            query = query.order_by(func.count(IssueRecording.recording_id).desc())
+        elif sort_by.value == IssueSortBy.LEAST_AFFECTED.value:
+            query = query.order_by(func.count(IssueRecording.recording_id).asc())
 
         return query.offset(skip).limit(limit).all()
 

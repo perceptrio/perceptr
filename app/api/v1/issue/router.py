@@ -1,15 +1,18 @@
-from fastapi import APIRouter, Depends, status
-from core.constants import APIPath
-from .schema import IssueCreate, IssueUpdate, IssueResponse, IssueWithIntervalsResponse
-from . import service
-from common.types import TokenPayload
-from typing_extensions import Annotated
-from common.middleware import GetPayload
-from sqlalchemy.orm import Session
-from database import get_db
-from typing import List
-from common.enums import IntervalCategory
 from datetime import datetime
+from typing import List
+
+from common.enums import IntervalCategory, IntervalSeverity, IssueSortBy
+from common.middleware import GetPayload
+from common.types import TokenPayload
+from core.constants import APIPath
+from database import get_db
+from fastapi import APIRouter, Depends, status
+from sqlalchemy.orm import Session
+from typing_extensions import Annotated
+from utils import get_issues_categories, get_issues_severities, get_issues_sort_by
+
+from . import service
+from .schema import IssueCreate, IssueResponse, IssueUpdate, IssueWithIntervalsResponse
 
 router = APIRouter(prefix=f"{APIPath.V1}/issues", tags=["issues"])
 
@@ -41,9 +44,11 @@ def get_issues_for_org(
     db: Session = Depends(get_db),
     skip: int = 0,
     limit: int = 100,
+    sort_by: IssueSortBy = Depends(get_issues_sort_by),
     search: str = None,
     is_resolved: bool = None,
-    category: IntervalCategory = None,
+    categories: list[IntervalCategory] | None = Depends(get_issues_categories),
+    severities: list[IntervalSeverity] | None = Depends(get_issues_severities),
     start_date: datetime = None,
     end_date: datetime = None,
 ):
@@ -52,9 +57,11 @@ def get_issues_for_org(
         payload.org.id,
         skip,
         limit,
+        sort_by,
         search,
         is_resolved,
-        category,
+        categories,
+        severities,
         start_date,
         end_date,
     )
