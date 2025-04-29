@@ -1010,6 +1010,40 @@ class RRWebSessionUtils:
             return {"success": False, "error": error_message}
 
 
+def merge_rrweb_batches(file_paths: List[str]) -> str:
+    """
+    Merge RRWeb batches into a single file.
+
+    Args:
+        file_paths: List of file paths to merge
+
+    Returns:
+        str: Path to the merged file
+    """
+    rrweb_json = {
+        "sessionId": "",
+        "startTime": "",
+        "endTime": "",
+        "data": []
+    }
+
+    for file_path in file_paths:
+        with open(file_path, "r") as f:
+            data = json.load(f)
+            if rrweb_json["sessionId"] == "":
+                rrweb_json["sessionId"] = data["sessionId"]
+            if rrweb_json["startTime"] == "":
+                rrweb_json["startTime"] = data["startTime"]
+            if rrweb_json["endTime"] == "":
+                rrweb_json["endTime"] = data["endTime"]
+            rrweb_json["data"].extend(data["data"])
+    
+    output_path = file_paths[0].split("batch_")[0] + "events.json"
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(rrweb_json, f, indent=2)
+    return output_path
+
+
 if __name__ == "__main__":
     try:
         # Example file path - replace with your actual file path

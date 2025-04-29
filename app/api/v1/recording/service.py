@@ -448,7 +448,6 @@ def analyze_recording(
 ) -> None:
     try:
         repository = RecordingRepository(db)
-        issue_repository = IssueRepository(db)
 
         # Get a fresh instance of the recording that's attached to the current session
         recording = repository.get_by_id(recording_id, org_id)
@@ -460,78 +459,7 @@ def analyze_recording(
                 f"{org_id}/recordings/{recording.file_name}"
             )
 
-            timestamped_frames = extract_all_frames(
-                local_recording_path, FRAMES_PER_SECOND
-            )
-            logger.info(f"Extracted {len(timestamped_frames)} frames from video")
-
-            if recording.file_duration is None:
-                recording.file_duration = get_recording_duration(local_recording_path)
-
-            analyzed_intervals = []
-            recording_intervals_summary = ""
-            total_intervals = len(range(0, len(timestamped_frames), INTERVAL_DURATION))
-
-            for idx, i in enumerate(
-                range(0, len(timestamped_frames), INTERVAL_DURATION)
-            ):
-                interval_frames = timestamped_frames[i : i + INTERVAL_DURATION]
-                timestamps = [t for t, _ in interval_frames]
-                logger.info(f"Processing interval {timestamps}")
-                recording_intervals, recording_interval_summary = analyze_interval(
-                    org_id, recording_id, interval_frames, should_resize_frame=True
-                )
-                summary_text = (
-                    f"Interval {timestamps[0]} - {timestamps[-1]} summary: "
-                    f"{recording_interval_summary}"
-                )
-                recording_intervals_summary += "\n" + summary_text
-
-                # Update interval analysis progress
-                progress = min(round((idx + 1) / total_intervals * 100, 2), 99.99)
-                recording.analysis_progress = progress
-                repository.update(recording)
-
-                analyzed_intervals.extend(recording_intervals)
-
-            has_intervals = (
-                recording_intervals_service.check_recording_intervals_with_recording_id(
-                    db, recording_id
-                )
-            )
-            if has_intervals:
-                recording_intervals_service.replace_recording_intervals(
-                    db, recording_id, analyzed_intervals
-                )
-            else:
-                recording_intervals_service.batch_create_recording_intervals(
-                    db, analyzed_intervals
-                )
-
-        logger.info(f"Summarizing recording {recording_id}")
-        recording_summary, recording_short_title = summarize_recording(
-            org_id, recording_id, recording_intervals_summary
-        )
-        logger.info(f"Recording summary: {recording_summary}")
-        logger.info(f"Recording short title: {recording_short_title}")
-
-        if recording_has_issues(analyzed_intervals):
-            logger.info(f"Processing issues for recording {recording_id}")
-            process_issues(db, org_id, recording_id, analyzed_intervals)
-            issues = issue_repository.get_issues_by_recording(org_id, recording_id)
-            categories = [issue.category for issue in issues]
-            recording.tags = process_tags(categories)
-            logger.info(f"Issues processed for recording {recording_id}")
-        else:
-            logger.info(f"No issues found for recording {recording_id}")
-
-        # Update final recording state
-        recording.summary = recording_summary
-        recording.short_title = recording_short_title
-        recording.set_analysis_status(AnalysisStatus.COMPLETED)
-        recording.analysis_error = None
-        recording.analysis_progress = 100
-        repository.update(recording)
+            analyze_local_recording_video(db, org_id, recording_id, recording, local_recording_path)
 
         logger.info(f"Analysis completed for recording {recording_id}")
         return None
@@ -773,7 +701,6 @@ def analyze_local_recording_video(
     recording_id: int,
     recording: Recording,
     local_recording_path: str,
-    session: RRWebSessionUtils,
 ) -> None:
     """Analyzes a local video recording using VideoRecordingAnalyzerGraph."""
     try:

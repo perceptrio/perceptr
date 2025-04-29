@@ -70,6 +70,7 @@ async def record_events(
 async def process_session(
     project_id: str,
     session_id: str,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> GenericResponse:
     """Trigger a session"""
@@ -78,13 +79,13 @@ async def process_session(
     if org is None:
         raise HTTPException(status_code=400, detail="Invalid project id")
 
-    recording = service.get_recording_by_session_id(db, session_id)
-    if recording and recording.status != AnalysisStatus.PENDING:
-        raise HTTPException(status_code=400, detail="Session not in pending state")
-
-    # Trigger the session
-    service.process_session(db, org.id, session_id)
-    return GenericResponse(success=True, message="Session triggered successfully")
+    try:
+        service.process_session(db, org.id, session_id, background_tasks)
+        return GenericResponse(success=True, message="Session triggered successfully")
+    except Exception as e:
+        raise HTTPException(
+            status_code=400, detail=f"Failed to process session: {str(e)}"
+        )
 
 
 @router.get(  # type: ignore

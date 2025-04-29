@@ -16,6 +16,7 @@ class VideoType(str, Enum):
     MPEG = "video/mpeg"
     OGG = "video/ogg"
     GZIP = "application/gzip"
+    JSON = "application/json"
     # for testing purposes
     JPEG = "image/jpeg"
 
