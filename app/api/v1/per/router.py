@@ -79,8 +79,13 @@ async def process_session(
     if org is None:
         raise HTTPException(status_code=400, detail="Invalid project id")
 
-    service.process_session(db, org.id, session_id, background_tasks)
-    return GenericResponse(success=True, message="Session triggered successfully")
+    try:
+        service.process_session(db, org.id, session_id, background_tasks)
+        return GenericResponse(success=True, message="Session triggered successfully")
+    except Exception as e:
+        raise HTTPException(
+            status_code=400, detail=f"Failed to process session: {str(e)}"
+        )
 
 
 @router.get(  # type: ignore

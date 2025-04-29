@@ -26,7 +26,9 @@ def get_org_by_project_id(db: Session, project_id: str) -> Org:
 
 def get_recording_by_session_id(db: Session, org_id: int, session_id: str) -> Recording:
     """Get recording by session ID"""
-    return recording_service.get_recording_by_session_id(session_id=session_id, org_id=org_id, db=db)
+    return recording_service.get_recording_by_session_id(
+        session_id=session_id, org_id=org_id, db=db
+    )
 
 
 def _compress_content(content: str) -> bytes:
@@ -186,7 +188,10 @@ def _process_events_background(
         except Exception as inner_e:
             logger.error(f"Error updating recording status: {str(inner_e)}")
 
-def _create_recording_from_session(db: Session, org_id: int, session_id: str) -> Recording:
+
+def _create_recording_from_session(
+    db: Session, org_id: int, session_id: str
+) -> Recording:
     """Create a recording from a session"""
     recording = RecordingCreate(
         org_id=org_id,
@@ -197,6 +202,7 @@ def _create_recording_from_session(db: Session, org_id: int, session_id: str) ->
         analysis_status=AnalysisStatus.IN_PROGRESS.value,
     )
     return recording_service.create_recording(db, recording)
+
 
 def _process_session_background(
     db: Session,
@@ -210,10 +216,14 @@ def _process_session_background(
         logger.info(f"Processing session {session_id}")
 
         # Download the session batches
-        with FilesDownloader(s3_service.get_s3_client(), keep_temp_dir=False) as downloader:
+        with FilesDownloader(
+            s3_service.get_s3_client(), keep_temp_dir=False
+        ) as downloader:
             session_prefix = f"{org_id}/{session_id}/"
             local_file_paths = downloader.download_all_session_batches(session_prefix)
-            logger.info(f"Downloaded {len(local_file_paths)} files for session {session_id}")
+            logger.info(
+                f"Downloaded {len(local_file_paths)} files for session {session_id}"
+            )
             # Process the files
 
             merged_file_path = merge_rrweb_batches(local_file_paths)
@@ -224,7 +234,7 @@ def _process_session_background(
             with open(merged_file_path, "rb") as f:
                 content = f.read()
                 # Decode bytes to string before compression
-                content_str = content.decode('utf-8')
+                content_str = content.decode("utf-8")
                 compressed_content = _compress_content(content_str)
                 s3_service.upload_file(s3_path, compressed_content)
 
@@ -241,7 +251,9 @@ def _process_session_background(
 
             # Skip sessions with 0 duration
             if duration == "00:00:00":
-                logger.info(f"Skipping analysis for session {session_id} with 0 duration")
+                logger.info(
+                    f"Skipping analysis for session {session_id} with 0 duration"
+                )
                 return
 
             # Convert to video
@@ -263,7 +275,7 @@ def _process_session_background(
                 else:
                     logger.error(f"Message: {result['message']}")
                 raise Exception(f"Video conversion failed: {result['error']}")
-            
+
     except Exception as e:
         logger.error(f"Error processing session {session_id}: {str(e)}")
         recording = recording_service.get_recording(db, recording.id, org_id)
@@ -279,18 +291,23 @@ def process_session(
     background_tasks: BackgroundTasks,
 ) -> dict:
     """Process a session"""
-    # TODO: Implement this
-    print("Processing session", session_id)
-    recording = _create_recording_from_session(db, org_id, session_id)
-    background_tasks.add_task(
-        _process_session_background,
-        db,
-        org_id,
-        session_id,
-        recording,
-    )
+    try:
+        recording = _create_recording_from_session(db, org_id, session_id)
+        if not recording:
+            raise ValueError("Failed to create recording")
 
-    return {"success": True, "message": "Session scheduled for processing"}
+        background_tasks.add_task(
+            _process_session_background,
+            db,
+            org_id,
+            session_id,
+            recording,
+        )
+
+        return {"success": True, "message": "Session scheduled for processing"}
+    except Exception as e:
+        logger.error(f"Error processing session {session_id}: {str(e)}")
+        raise
 
 
 def process_events(
