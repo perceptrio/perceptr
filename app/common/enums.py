@@ -29,6 +29,19 @@ class IntervalCategory(Enum):
     ENHANCEMENT = "ENHANCEMENT"
 
 
+class IntervalSeverity(Enum):
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+
+
+class IssueSortBy(str, Enum):
+    LATEST = "latest"
+    OLDEST = "oldest"
+    MOST_AFFECTED = "most_affected"
+    LEAST_AFFECTED = "least_affected"
+
+
 class AnalysisStatus(str, Enum):
     PENDING = "pending"
     IN_PROGRESS = "in_progress"

@@ -1,9 +1,9 @@
-from sqlalchemy.orm import Session
-from sqlalchemy import func, and_
-from models.recording import Recording
+from common.enums import AnalysisStatus
 from models.issue import Issue
 from models.issue_recording import IssueRecording
-from common.enums import AnalysisStatus
+from models.recording import Recording
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
 
 class AnalyticsRepository:
@@ -60,7 +60,7 @@ class AnalyticsRepository:
                 Recording.org_id == org_id,
                 Recording.analysis_status == AnalysisStatus.COMPLETED.value,
                 Recording.deleted_at == None,
-                ~Recording.id.in_(recordings_with_issues),
+                ~Recording.id.in_(select(recordings_with_issues)),
             )
             .scalar()
         )
