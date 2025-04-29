@@ -223,7 +223,9 @@ def _process_session_background(
             s3_path = f"{org_id}/{session_id}/events.json.gzip"
             with open(merged_file_path, "rb") as f:
                 content = f.read()
-                compressed_content = _compress_content(content)
+                # Decode bytes to string before compression
+                content_str = content.decode('utf-8')
+                compressed_content = _compress_content(content_str)
                 s3_service.upload_file(s3_path, compressed_content)
 
             session = RRWebSessionUtils(merged_file_path)
@@ -264,6 +266,7 @@ def _process_session_background(
             
     except Exception as e:
         logger.error(f"Error processing session {session_id}: {str(e)}")
+        recording = recording_service.get_recording(db, recording.id, org_id)
         recording.analysis_status = AnalysisStatus.FAILED.value
         recording.analysis_error = str(e)
         recording_service.update_recording(db, recording)
