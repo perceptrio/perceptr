@@ -252,7 +252,7 @@ def _process_session_background(
                 logger.info(f"Video saved to: {result['output_path']}")
                 if settings.AI_ANALYSIS_ENABLED:
                     recording_service.analyze_local_recording_video(
-                        db, org_id, recording.id, recording, result["output_path"], session
+                        db, org_id, recording.id, recording, result["output_path"]
                     )
                 else:
                     logger.info("AI analysis is disabled, skipping analysis")
@@ -383,7 +383,7 @@ def schedule_session_analysis(
             logger.info(f"Video saved to: {result['output_path']}")
             if settings.AI_ANALYSIS_ENABLED:
                 recording_service.analyze_local_recording_video(
-                    db, org_id, recording_id, recording, result["output_path"], session
+                    db, org_id, recording_id, recording, result["output_path"]
                 )
             else:
                 logger.info("AI analysis is disabled, skipping analysis")
