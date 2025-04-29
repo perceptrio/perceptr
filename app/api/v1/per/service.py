@@ -29,7 +29,7 @@ def get_recording_by_session_id(db: Session, org_id: int, session_id: str) -> Re
     return recording_service.get_recording_by_session_id(session_id=session_id, org_id=org_id, db=db)
 
 
-def _compress_jsonl(content: str) -> bytes:
+def _compress_content(content: str) -> bytes:
     """Compress content using gzip"""
     compressed_content = io.BytesIO()
     with gzip.GzipFile(fileobj=compressed_content, mode="wb") as f:
@@ -127,10 +127,10 @@ def _update_recording_file(
         # Decompress, append, and recompress
         existing_content = _decompress_gzip(content)
         updated_content = existing_content + json_line.encode("utf-8")
-        compressed_bytes = _compress_jsonl(updated_content.decode("utf-8"))
+        compressed_bytes = _compress_content(updated_content.decode("utf-8"))
     else:
         # Create new file
-        compressed_bytes = _compress_jsonl(json_line)
+        compressed_bytes = _compress_content(json_line)
 
     # Upload to S3
     s3_service.upload_file(s3_path, compressed_bytes)
@@ -191,7 +191,7 @@ def _create_recording_from_session(db: Session, org_id: int, session_id: str) ->
     recording = RecordingCreate(
         org_id=org_id,
         session_id=session_id,
-        file_name=f"{session_id}/events.json",
+        file_name=f"{session_id}/events.json.gzip",
         file_type=VideoType.JSON.value,
         file_size=0,
         analysis_status=AnalysisStatus.IN_PROGRESS.value,
@@ -220,9 +220,11 @@ def _process_session_background(
             logger.info(f"Merged file saved to {merged_file_path}")
 
             # Upload the merged file to S3
-            s3_path = f"{org_id}/{session_id}/events.json"
+            s3_path = f"{org_id}/{session_id}/events.json.gzip"
             with open(merged_file_path, "rb") as f:
-                s3_service.upload_file(s3_path, f.read())
+                content = f.read()
+                compressed_content = _compress_content(content)
+                s3_service.upload_file(s3_path, compressed_content)
 
             session = RRWebSessionUtils(merged_file_path)
 
@@ -258,6 +260,7 @@ def _process_session_background(
                     logger.error(f"Error: {result['error']}")
                 else:
                     logger.error(f"Message: {result['message']}")
+                raise Exception(f"Video conversion failed: {result['error']}")
             
     except Exception as e:
         logger.error(f"Error processing session {session_id}: {str(e)}")
