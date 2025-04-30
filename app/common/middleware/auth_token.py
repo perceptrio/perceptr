@@ -52,6 +52,7 @@ class GetPayload:
         payload = TokenPayload(
             org=AbstractOrg(id=org.id, name=org.name, email=org.email)
         )
+        logger.set_context(org_id=org.id)
         return payload
 
 

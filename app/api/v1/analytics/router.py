@@ -1,12 +1,13 @@
-from fastapi import APIRouter, Depends
-from core.constants import APIPath
-from .schema import KeyMetricsResponse
-from . import service
+from common.middleware.auth_token import GetPayload
 from common.types import TokenPayload
-from typing_extensions import Annotated
-from common.middleware import GetPayload
-from sqlalchemy.orm import Session
+from core.constants import APIPath
 from database import get_db
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+from typing_extensions import Annotated
+
+from . import service
+from .schema import KeyMetricsResponse
 
 router = APIRouter(prefix=f"{APIPath.V1}/analytics", tags=["analytics"])
 

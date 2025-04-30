@@ -1,8 +1,8 @@
 from typing import List
 
 from api.v1.org import service
-from api.v1.org.schema import OrgCreate, OrgLogin, OrgResponse, OrgUpdate, Token
-from common.middleware import GetPayload, get_current_org
+from api.v1.org.schema import OrgCreate, OrgLogin, OrgResponse, Token
+from common.middleware.auth_token import GetPayload
 from common.types import CreateTokenPayload, TokenPayload
 from core.constants import APIPath
 from database import get_db
