@@ -1,9 +1,9 @@
 import os
 import time
-from typing import Annotated, Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from common.services.logger import logger
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
@@ -19,10 +19,9 @@ os.environ["LANGFUSE_SECRET_KEY"] = settings.LANGFUSE_PRIVATE_KEY
 os.environ["LANGFUSE_HOST"] = settings.LANGFUSE_HOST
 
 import numpy as np
+from google import genai
 from pydantic import BaseModel, Field
 from utils.graph import map_timestamped_frames_to_messages
-
-from google import genai
 
 
 class TimestampDescription(BaseModel):
@@ -34,9 +33,7 @@ class TimestampDescription(BaseModel):
     ui_design_feedback: Optional[str] = Field(
         description="Observations and recommendations focused solely on the UI elements and overall visual design of the screenshot. Assess aspects such as layout, alignment, color contrast, typography, spacing, and responsiveness. Note any areas where the design could be optimized, improved, or clarified. If no visual feedback is required, leave this field empty. No need for positive feedback, only feedback on what could be improved."
     )
-    timestamp: str = Field(
-        description="The timestamp in the recording. Format: MM:SS"
-    )
+    timestamp: str = Field(description="The timestamp in the recording. Format: MM:SS")
 
 
 # class RecordingAnalysis(BaseModel):
@@ -86,6 +83,7 @@ class RecordingAnalysis(BaseModel):
 class State(TypedDict):
     recording_path: str
     recording_analysis: RecordingAnalysis
+    file_type: str
 
 
 class VideoRecordingAnalyzerGraph:
@@ -108,7 +106,7 @@ class VideoRecordingAnalyzerGraph:
         # Configure genai client for file uploads
         # genai.configure(api_key=settings.GEMINI_API_KEY)
         self.gemini_client = genai.Client(api_key=settings.GEMINI_API_KEY)
-        
+
         graph_builder.add_node("recording_analyzer", self.recording_analyzer)
 
         graph_builder.add_edge(START, "recording_analyzer")
@@ -162,36 +160,62 @@ class VideoRecordingAnalyzerGraph:
     #     return response
 
     def gemini_recording_analyzer(
-        self, recording_path: str
+        self, recording_path: str, file_type: str
     ) -> RecordingAnalysis:
-        
         # --- Upload video using File API ---
         logger.info(f"Uploading video file: {recording_path} using File API...")
         # Consider adding error handling for file not found
         try:
-            uploaded_file = self.gemini_client.files.upload(file=recording_path)
-            logger.info(f"File uploaded successfully: {uploaded_file.uri}, Name: {uploaded_file.name}")
+            uploaded_file = self.gemini_client.files.upload(
+                file=recording_path,
+                config={
+                    "mime_type": file_type,
+                },
+            )
+            logger.info(
+                f"File uploaded successfully",
+                file_uri=uploaded_file.uri,
+                file_name=uploaded_file.name,
+            )
 
             # Wait for the file to be processed
             while uploaded_file.state.name == "PROCESSING":
-                logger.info("Waiting for video processing...")
-                time.sleep(10) # Adjust sleep time as needed
+                logger.info(
+                    "Waiting for video processing...",
+                    file_uri=uploaded_file.uri,
+                    file_name=uploaded_file.name,
+                )
+                time.sleep(10)  # Adjust sleep time as needed
                 # Fetch the latest file state
                 uploaded_file = self.gemini_client.files.get(name=uploaded_file.name)
 
-
             if uploaded_file.state.name == "FAILED":
-                logger.error(f"Video file processing failed: {uploaded_file.name}")
-                raise ValueError(f"Video processing failed for file: {uploaded_file.name}")
+                logger.error(
+                    f"Video file processing failed",
+                    file_uri=uploaded_file.uri,
+                    file_name=uploaded_file.name,
+                )
+                raise ValueError(
+                    f"Video processing failed for file: {uploaded_file.name}"
+                )
 
-            logger.info(f"Video file ready: {uploaded_file.uri}")
-            
+            logger.info(
+                "Video file ready",
+                file_uri=uploaded_file.uri,
+                file_name=uploaded_file.name,
+            )
+
             # Ensure correct mime_type is used - get it from the uploaded file object
-            mime_type = uploaded_file.mime_type 
+            mime_type = uploaded_file.mime_type
             file_uri = uploaded_file.uri
 
         except Exception as e:
-            logger.error(f"Error during video upload or processing: {e}", exc_info=True)
+            logger.error(
+                "Error during video upload or processing",
+                exc_info=e,
+                file_uri=uploaded_file.uri,
+                file_name=uploaded_file.name,
+            )
             # Consider how to handle this - maybe raise a specific exception
             # For now, re-raising the original exception
             raise e
@@ -239,7 +263,7 @@ Provide your analysis as a list of interval objects. Each interval object must c
     - **Timestamp:** The timestamp in the recording. Format: MM:SS
 
 
-    
+
 **Category Definitions & Rules:**
 
 - **BUG:** Use when functionality is broken, an error occurs, or the system behaves in a way that prevents task completion correctly. High impact.
@@ -273,38 +297,47 @@ Now, please analyze the provided user session recording data and generate the st
 
         # Construct message using file_uri from File API
         messages = [
-            HumanMessage(content=[
-                {
-                    "type": "media",
-                    "mime_type": mime_type, 
-                    "file_uri": file_uri # Use file_uri instead of data
-                },
-                {
-                    "type": "text",
-                    "text": prompt
-                }
-            ])
+            HumanMessage(
+                content=[
+                    {
+                        "type": "media",
+                        "mime_type": mime_type,
+                        "file_uri": file_uri,  # Use file_uri instead of data
+                    },
+                    {"type": "text", "text": prompt},
+                ]
+            )
         ]
         try:
-            response = self.gemini_llm.with_structured_output(RecordingAnalysis).invoke(messages)
+            response = self.gemini_llm.with_structured_output(RecordingAnalysis).invoke(
+                messages
+            )
         finally:
             # Clean up the uploaded file on Google Cloud Storage
             # Optional: Keep if you might reuse the file quickly, but generally good to clean up.
             try:
-                 logger.info(f"Deleting uploaded file: {uploaded_file.name}")
-                 self.gemini_client.files.delete(name=uploaded_file.name)
+                logger.info(f"Deleting uploaded file", file_uri=uploaded_file.uri)
+                self.gemini_client.files.delete(name=uploaded_file.name)
             except Exception as delete_error:
-                 logger.warning(f"Failed to delete uploaded file {uploaded_file.name}: {delete_error}")
+                logger.warning(
+                    f"Failed to delete uploaded file",
+                    file_uri=uploaded_file.uri,
+                    file_name=uploaded_file.name,
+                    exc_info=delete_error,
+                )
 
-        return response  # type: ignore[no-any-return]
+        return response
 
     def recording_analyzer(self, state: State, config: RunnableConfig) -> dict:
         recording_path = state["recording_path"]
-        response = self.gemini_recording_analyzer(recording_path)
+        file_type = state["file_type"]
+        response = self.gemini_recording_analyzer(recording_path, file_type)
 
-        return {"recording_analysis": response}
-
-   
+        return {
+            "recording_path": recording_path,
+            "file_type": file_type,
+            "recording_analysis": response,
+        }
 
     def get_graph(self) -> StateGraph:
         return self.graph
@@ -315,6 +348,7 @@ Now, please analyze the provided user session recording data and generate the st
         org_id: str,
         recording_id: str,
         recording_path: str,
+        file_type: str,
     ) -> Dict[str, Any]:
         langfuse_context.update_current_trace(
             session_id=recording_id,
@@ -333,11 +367,11 @@ Now, please analyze the provided user session recording data and generate the st
         }
         try:
             resp = self.graph.invoke(
-                {"recording_path": recording_path},
+                {"recording_path": recording_path, "file_type": file_type},
                 config=config,
                 # debug=True
             )
-            return resp  # type: ignore[no-any-return]
+            return resp
         except Exception as e:
-            logger.error(f"Error creating graph with response error: {str(e)}")
+            logger.error(f"Error creating graph with response error", exc_info=e)
             raise e

@@ -22,7 +22,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         # await sqs_listener.start()
         # logger.info("SQS listener service started successfully")
     except Exception as e:
-        logger.error(f"Failed to start SQS listener service: {str(e)}")
+        logger.error(
+            "Failed to start SQS listener service",
+            exc_info=e,
+            service="sqs_listener",
+            action="startup",
+        )
 
     try:
         yield
@@ -33,7 +38,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             # await sqs_listener.stop()
             # logger.info("SQS listener service stopped successfully")
         except Exception as e:
-            logger.error(f"Error while stopping SQS listener service: {str(e)}")
+            logger.error(
+                "Error while stopping SQS listener service",
+                exc_info=e,
+                service="sqs_listener",
+                action="shutdown",
+            )
 
 
 app = FastAPI(lifespan=lifespan)

@@ -1,7 +1,10 @@
 import logging
 import threading
+import traceback
 from contextlib import contextmanager
-from typing import Any, Iterator
+from typing import Any, Iterator, Optional
+
+from pythonjsonlogger import jsonlogger
 
 
 class ContextLogger:
@@ -19,10 +22,10 @@ class ContextLogger:
         self.logger = logging.getLogger("ContextLogger")
         self.logger.setLevel(logging.DEBUG)
 
-        # Create console handler with formatting
+        # Create JSON handler with formatting
         handler = logging.StreamHandler()
-        formatter = logging.Formatter(
-            "%(asctime)s - %(levelname)s - %(context)s - %(message)s"
+        formatter = jsonlogger.JsonFormatter(
+            fmt="%(asctime)s %(levelname)s %(name)s %(context)s %(message)s %(stack_trace)s"
         )
         handler.setFormatter(formatter)
         self.logger.addHandler(handler)
@@ -49,32 +52,65 @@ class ContextLogger:
         finally:
             self._context.data = old_context
 
-    def _log(self, level: int, message: str, **kwargs: Any) -> None:
+    def _log(
+        self,
+        level: int,
+        message: str,
+        exc_info: Optional[Exception] = None,
+        **kwargs: Any,
+    ) -> None:
         try:
             context = self._context.data.copy()
         except AttributeError:
             # Initialize data if it doesn't exist
             self._context.data = {}
             context = {}
+
         context.update(kwargs)
-        context_str = " ".join(f"{k}={v}" for k, v in context.items())
-        extra = {"context": context_str if context_str else "no_context"}
-        self.logger.log(level, message, extra=extra)
 
-    def debug(self, message: str, **kwargs: Any) -> None:
-        self._log(logging.DEBUG, message, **kwargs)
+        # Convert context to a JSON-friendly format
+        context_dict = {k: str(v) for k, v in context.items()}
 
-    def info(self, message: str, **kwargs: Any) -> None:
-        self._log(logging.INFO, message, **kwargs)
+        # Add stack trace if exception info is provided
+        extra = {
+            "context": context_dict,
+        }
 
-    def warning(self, message: str, **kwargs: Any) -> None:
-        self._log(logging.WARNING, message, **kwargs)
+        if exc_info:
+            extra["stack_trace"] = "".join(
+                traceback.format_exception(
+                    type(exc_info), exc_info, exc_info.__traceback__
+                )
+            )
 
-    def error(self, message: str, **kwargs: Any) -> None:
-        self._log(logging.ERROR, message, **kwargs)
+        self.logger.log(
+            level, message, extra=extra, exc_info=exc_info if exc_info else None
+        )
 
-    def critical(self, message: str, **kwargs: Any) -> None:
-        self._log(logging.CRITICAL, message, **kwargs)
+    def debug(
+        self, message: str, exc_info: Optional[Exception] = None, **kwargs: Any
+    ) -> None:
+        self._log(logging.DEBUG, message, exc_info, **kwargs)
+
+    def info(
+        self, message: str, exc_info: Optional[Exception] = None, **kwargs: Any
+    ) -> None:
+        self._log(logging.INFO, message, exc_info, **kwargs)
+
+    def warning(
+        self, message: str, exc_info: Optional[Exception] = None, **kwargs: Any
+    ) -> None:
+        self._log(logging.WARNING, message, exc_info, **kwargs)
+
+    def error(
+        self, message: str, exc_info: Optional[Exception] = None, **kwargs: Any
+    ) -> None:
+        self._log(logging.ERROR, message, exc_info, **kwargs)
+
+    def critical(
+        self, message: str, exc_info: Optional[Exception] = None, **kwargs: Any
+    ) -> None:
+        self._log(logging.CRITICAL, message, exc_info, **kwargs)
 
 
 # Create a singleton instance

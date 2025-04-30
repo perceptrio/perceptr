@@ -142,5 +142,5 @@ class IssuesSummarizerGraph:
             )
             return resp  # type: ignore[no-any-return]
         except Exception as e:
-            logger.error(f"Error creating graph with response error: {str(e)}")
+            logger.error(f"Error creating graph with response error", exc_info=e)
             raise e

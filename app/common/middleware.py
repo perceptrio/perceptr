@@ -1,15 +1,15 @@
 # middleware
 from typing import Annotated, Literal
+
+from common.services.logger import logger
+from common.types import AbstractOrg, TokenPayload
+from database import get_db
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from jose import JWTError, jwt
-from requests import Session
-
-from database import get_db
+from jose import ExpiredSignatureError, JWTError, jwt
 from models.org import Org
-from utils.auth import ALGORITHM, SECRET_KEY, REFRESH_SECRET_KEY
-from common.types import TokenPayload, AbstractOrg
-from common.services.logger import logger
+from requests import Session
+from utils.auth import ALGORITHM, REFRESH_SECRET_KEY, SECRET_KEY
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/v1/orgs/token")
 
@@ -35,8 +35,11 @@ class GetPayload:
                 payload_dict = jwt.decode(
                     token, REFRESH_SECRET_KEY, algorithms=[ALGORITHM]
                 )
+        except ExpiredSignatureError as e:
+            logger.info("Token expired")
+            raise credentials_exception
         except JWTError as e:
-            logger.error(f"Error decoding token in middleware: {e}")
+            logger.error("Error decoding token in middleware", exc_info=e)
             raise credentials_exception
         org_id = payload_dict.get("org_id")
         try:
@@ -44,7 +47,7 @@ class GetPayload:
             if org is None:
                 raise credentials_exception
         except Exception as e:
-            logger.error(f"Error getting org in middleware: {e}")
+            logger.error(f"Error getting org in middleware", exc_info=e)
             raise credentials_exception
         payload = TokenPayload(
             org=AbstractOrg(id=org.id, name=org.name, email=org.email)

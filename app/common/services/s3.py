@@ -43,7 +43,7 @@ class S3Service:
             )
             return cast(str, url)
         except ClientError as e:
-            logger.error(f"Error generating presigned URL: {str(e)}")
+            logger.error(f"Error generating presigned URL", exc_info=e)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="could not generate presigned URL",
@@ -101,7 +101,7 @@ class S3Service:
         try:
             self.s3_client.delete_object(Bucket=self.bucket_name, Key=file_path)
         except ClientError as e:
-            logger.error(f"Error deleting file: {str(e)}")
+            logger.error(f"Error deleting file", exc_info=e)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="could not delete file",
@@ -113,7 +113,7 @@ class S3Service:
             response = self.s3_client.get_object(Bucket=self.bucket_name, Key=file_path)
             return cast(bytes, response["Body"].read())
         except ClientError as e:
-            logger.error(f"Error downloading file: {str(e)}")
+            logger.error(f"Error downloading file", exc_info=e)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="could not download file",
@@ -165,7 +165,7 @@ class S3Service:
 
             return contents
         except ClientError as e:
-            logger.error(f"Error listing folder contents: {str(e)}")
+            logger.error(f"Error listing folder contents", exc_info=e)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="could not list folder contents",
@@ -188,7 +188,7 @@ class S3Service:
                     Bucket=self.bucket_name, Delete={"Objects": batch}
                 )
         except ClientError as e:
-            logger.error(f"could not delete folder: {str(e)}")
+            logger.error(f"could not delete folder", exc_info=e)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="could not delete folder",

@@ -60,15 +60,15 @@ class SQSListener:
                                     ReceiptHandle=message["ReceiptHandle"],
                                 )
                         except ClientError as e:
-                            logger.error(f"AWS error processing message: {str(e)}")
+                            logger.error(f"AWS error processing message", exc_info=e)
 
                 except ClientError as e:
-                    logger.error(f"AWS error receiving messages: {str(e)}")
+                    logger.error(f"AWS error receiving messages", exc_info=e)
                     if not self.is_running:
                         break
                 except Exception as e:
                     logger.error(
-                        f"Unexpected error in message handling thread: {str(e)}"
+                        f"Unexpected error in message handling thread", exc_info=e
                     )
                     if not self.is_running:
                         break
@@ -101,13 +101,13 @@ class SQSListener:
             return True
 
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse message body: {str(e)}")
+            logger.error(f"Failed to parse message body", exc_info=e)
             return False
         except KeyError as e:
-            logger.error(f"Missing required field in message: {str(e)}")
+            logger.error(f"Missing required field in message", exc_info=e)
             return False
         except Exception as e:
-            logger.error(f"Error processing message: {str(e)}")
+            logger.error(f"Error processing message", exc_info=e)
             return False
 
     async def start(self) -> None:
