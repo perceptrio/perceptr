@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime, time
 from typing import Any, Callable, List, Optional, Tuple, TypeVar, cast
 
@@ -58,7 +59,7 @@ def convert_model_to_schema(recording: Recording) -> Recording:
 def validate_video_type(content_type: VideoType) -> None:
     """Validate that the content type is an allowed video format"""
     if content_type not in [t.value for t in VideoType]:
-        logger.error(f"Invalid video type: {content_type}")
+        logger.error("Invalid video type", content_type=content_type)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid video type"
         )
@@ -67,7 +68,7 @@ def validate_video_type(content_type: VideoType) -> None:
 def validate_recording_type(recording_type: RecordingType) -> None:
     """Validate that the recording type is allowed"""
     if recording_type not in [t.value for t in RecordingType]:
-        logger.error(f"Invalid recording type: {recording_type}")
+        logger.error("Invalid recording type", recording_type=recording_type)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid recording type"
         )
@@ -199,6 +200,7 @@ def create_recording_for_upload(
             file_name=recording.file_name,
             file_size=recording.file_size,
             file_type=recording.file_type,
+            session_id=str(uuid.uuid4()),
             org_id=org_id,
         )
     )
@@ -270,7 +272,11 @@ def post_analysis_process(callback: Optional[Callable] = None) -> Callable[[F], 
             **kwargs: Any,
         ) -> Any:
             result = func(db, org_id, recording_id, recording, *args, **kwargs)
-            logger.info(f"Analysis Process Completed - Recording: {recording_id}")
+            logger.info(
+                "Analysis Process Completed for Recording",
+                recording_id=recording_id,
+                org_id=org_id,
+            )
             return result
 
         return cast(F, wrapper)
@@ -300,7 +306,8 @@ def format_timestamp(seconds: float) -> str:
     """Converts float seconds to HH:MM:SS format."""
     if not isinstance(seconds, (int, float)) or seconds < 0:
         logger.warning(
-            f"Invalid timestamp encountered: {seconds}. Defaulting to 00:00:00"
+            "Invalid timestamp encountered. Defaulting to 00:00:00",
+            seconds=seconds,
         )
         return "00:00:00"
     # No need for math.modf if we just need HH:MM:SS
@@ -459,14 +466,23 @@ def analyze_recording(
                 f"{org_id}/recordings/{recording.file_name}"
             )
 
-            analyze_local_recording_video(db, org_id, recording_id, recording, local_recording_path)
+            analyze_local_recording_video(
+                db, org_id, recording_id, recording, local_recording_path
+            )
 
-        logger.info(f"Analysis completed for recording {recording_id}")
+        logger.info(
+            "Analysis completed for recording",
+            recording_id=recording_id,
+            org_id=org_id,
+        )
         return None
 
     except Exception as e:
         logger.error(
-            "Error analyzing recording", recording_id=recording_id, error=str(e)
+            "Error analyzing recording",
+            recording_id=recording_id,
+            org_id=org_id,
+            exc_info=e,
         )
         # Get a fresh instance for error handling
         recording = repository.get_by_id(recording_id, org_id)
@@ -683,7 +699,10 @@ def analyze_local_recording(
 
     except Exception as e:
         logger.error(
-            "Error analyzing recording", recording_id=recording_id, error=str(e)
+            "Error analyzing recording",
+            recording_id=recording_id,
+            org_id=org_id,
+            exc_info=e,
         )
         # Get a fresh instance for error handling
         recording = repository.get_by_id(recording_id, org_id)
@@ -725,6 +744,7 @@ def analyze_local_recording_video(
             org_id=str(org_id),  # Ensure org_id is string if required by graph
             recording_id=str(recording_id),  # Ensure recording_id is string if required
             recording_path=local_recording_path,
+            file_type=recording.file_type,
         )
 
         recording_analysis = analysis_response.get("recording_analysis")
@@ -749,34 +769,44 @@ def analyze_local_recording_video(
                     hhmmss_str = time_obj.strftime("%H:%M:%S")
                     # Dump original object and update the timestamp
                     ts_dict = ts_desc.model_dump()
-                    ts_dict['timestamp'] = hhmmss_str
+                    ts_dict["timestamp"] = hhmmss_str
                     processed_timestamp_descriptions_json.append(ts_dict)
                 except ValueError:
                     # Handle cases where the timestamp might not be in MM:SS format
-                    logger.warning(f"Could not parse timestamp '{ts_desc.timestamp}' for recording {recording_id}. Storing original.")
-                    processed_timestamp_descriptions_json.append(ts_desc.model_dump()) # Store original if parsing fails
+                    logger.warning(
+                        f"Could not parse timestamp '{ts_desc.timestamp}' for recording {recording_id}. Storing original."
+                    )
+                    processed_timestamp_descriptions_json.append(
+                        ts_desc.model_dump()
+                    )  # Store original if parsing fails
 
             # Convert MM:SS string from graph for start/end times to datetime.time object
             try:
-                start_time_obj = datetime.strptime(interval_data.start_time, "%M:%S").time()
+                start_time_obj = datetime.strptime(
+                    interval_data.start_time, "%M:%S"
+                ).time()
             except ValueError:
-                 logger.warning(f"Could not parse start_time '{interval_data.start_time}' for recording {recording_id}. Defaulting to 00:00:00.")
-                 start_time_obj = time(0, 0, 0)
+                logger.warning(
+                    f"Could not parse start_time '{interval_data.start_time}' for recording {recording_id}. Defaulting to 00:00:00."
+                )
+                start_time_obj = time(0, 0, 0)
             try:
                 end_time_obj = datetime.strptime(interval_data.end_time, "%M:%S").time()
             except ValueError:
-                logger.warning(f"Could not parse end_time '{interval_data.end_time}' for recording {recording_id}. Defaulting to 00:00:00.")
+                logger.warning(
+                    f"Could not parse end_time '{interval_data.end_time}' for recording {recording_id}. Defaulting to 00:00:00."
+                )
                 end_time_obj = time(0, 0, 0)
 
             analyzed_intervals.append(
                 RecordingInterval(
                     recording_id=recording_id,
-                    start_time=start_time_obj, # Use converted time object
-                    end_time=end_time_obj,     # Use converted time object
+                    start_time=start_time_obj,  # Use converted time object
+                    end_time=end_time_obj,  # Use converted time object
                     category=interval_data.category,
                     issue=interval_data.issue,
                     short_title=interval_data.short_title,
-                    timestamp_descriptions=processed_timestamp_descriptions_json, # Use processed JSON list
+                    timestamp_descriptions=processed_timestamp_descriptions_json,  # Use processed JSON list
                     description=interval_data.description,
                 )
             )
@@ -833,9 +863,7 @@ def analyze_local_recording_video(
         # Potentially update file_duration if not already set and if determinable
         if recording.file_duration is None:
             try:
-                recording.file_duration = get_recording_duration(
-                    local_recording_path
-                )
+                recording.file_duration = get_recording_duration(local_recording_path)
             except Exception as dur_err:
                 logger.warning(
                     f"Could not determine duration for {local_recording_path}: {dur_err}"
@@ -850,15 +878,13 @@ def analyze_local_recording_video(
         logger.error(
             "Error analyzing video recording",
             recording_id=recording_id,
-            error=str(e),
-            exc_info=True,
+            org_id=org_id,
+            exc_info=e,
         )
         # Ensure repository is defined in exception block scope if needed
         try:
             recording_repo_on_error = RecordingRepository(db)
-            recording_on_error = recording_repo_on_error.get_by_id(
-                recording_id, org_id
-            )
+            recording_on_error = recording_repo_on_error.get_by_id(recording_id, org_id)
             if recording_on_error:
                 recording_on_error.set_analysis_status(AnalysisStatus.FAILED)
                 recording_on_error.analysis_error = str(e)
@@ -866,6 +892,8 @@ def analyze_local_recording_video(
         except Exception as update_err:
             logger.error(
                 f"Failed to update recording status to FAILED for {recording_id}",
-                error=str(update_err),
+                org_id=org_id,
+                recording_id=recording_id,
+                exc_info=update_err,
             )
         return None

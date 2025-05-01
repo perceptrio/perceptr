@@ -1,14 +1,48 @@
 import asyncio
 import json
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import asynccontextmanager
 from functools import lru_cache
-from typing import Any, Dict, Optional
+from typing import Any, AsyncGenerator, Dict, Optional
 
 import boto3
 from botocore.exceptions import ClientError
 from common.services.logger import logger
 from core.constants import SQSQueueConfig
+from fastapi import FastAPI
 from settings import settings
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    # Startup
+    try:
+        sqs_listener = get_sqs_listener()
+        # await sqs_listener.start()
+        # logger.info("SQS listener service started successfully")
+    except Exception as e:
+        logger.error(
+            "Failed to start SQS listener service",
+            exc_info=e,
+            service="sqs_listener",
+            action="startup",
+        )
+
+    try:
+        yield
+    finally:
+        # Ensure cleanup happens in finally block
+        try:
+            sqs_listener = get_sqs_listener()
+            # await sqs_listener.stop()
+            # logger.info("SQS listener service stopped successfully")
+        except Exception as e:
+            logger.error(
+                "Error while stopping SQS listener service",
+                exc_info=e,
+                service="sqs_listener",
+                action="shutdown",
+            )
 
 
 class SQSListener:
@@ -60,15 +94,15 @@ class SQSListener:
                                     ReceiptHandle=message["ReceiptHandle"],
                                 )
                         except ClientError as e:
-                            logger.error(f"AWS error processing message: {str(e)}")
+                            logger.error(f"AWS error processing message", exc_info=e)
 
                 except ClientError as e:
-                    logger.error(f"AWS error receiving messages: {str(e)}")
+                    logger.error(f"AWS error receiving messages", exc_info=e)
                     if not self.is_running:
                         break
                 except Exception as e:
                     logger.error(
-                        f"Unexpected error in message handling thread: {str(e)}"
+                        f"Unexpected error in message handling thread", exc_info=e
                     )
                     if not self.is_running:
                         break
@@ -101,13 +135,13 @@ class SQSListener:
             return True
 
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse message body: {str(e)}")
+            logger.error(f"Failed to parse message body", exc_info=e)
             return False
         except KeyError as e:
-            logger.error(f"Missing required field in message: {str(e)}")
+            logger.error(f"Missing required field in message", exc_info=e)
             return False
         except Exception as e:
-            logger.error(f"Error processing message: {str(e)}")
+            logger.error(f"Error processing message", exc_info=e)
             return False
 
     async def start(self) -> None:

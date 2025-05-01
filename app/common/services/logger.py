@@ -1,12 +1,21 @@
 import logging
 import threading
-from contextlib import contextmanager
-from typing import Any, Iterator
+import traceback
+from typing import Any, Optional
+
+from pythonjsonlogger import jsonlogger
+
+# Disable FastAPI's default error logging
+uvicorn_access = logging.getLogger("uvicorn.access")
+uvicorn_access.disabled = True
+uvicorn_error = logging.getLogger("uvicorn.error")
+uvicorn_error.disabled = True
 
 
 class ContextLogger:
     _instance = None
     _lock = threading.Lock()
+    _context = {}
 
     def __new__(cls) -> "ContextLogger":
         with cls._lock:
@@ -19,62 +28,70 @@ class ContextLogger:
         self.logger = logging.getLogger("ContextLogger")
         self.logger.setLevel(logging.DEBUG)
 
-        # Create console handler with formatting
+        # Create JSON handler with formatting
         handler = logging.StreamHandler()
-        formatter = logging.Formatter(
-            "%(asctime)s - %(levelname)s - %(context)s - %(message)s"
+        formatter = jsonlogger.JsonFormatter(
+            fmt="%(asctime)s %(levelname)s %(message)s %(stack_trace)s"
         )
         handler.setFormatter(formatter)
         self.logger.addHandler(handler)
 
-        # Thread-local storage for context
-        self._context = threading.local()
-        self._context.data = {}
-
     def set_context(self, **kwargs: Any) -> None:
         """Add key-value pairs to the current context"""
-        self._context.data.update(kwargs)
+        self._context.update(kwargs)
 
     def clear_context(self) -> None:
         """Clear all context data"""
-        self._context.data = {}
+        self._context = {}
 
-    @contextmanager
-    def context(self, **kwargs: Any) -> Iterator[None]:
-        """Temporary context manager that automatically cleans up"""
-        old_context = self._context.data.copy()
-        self.set_context(**kwargs)
-        try:
-            yield
-        finally:
-            self._context.data = old_context
+    def _log(
+        self,
+        level: int,
+        message: str,
+        exc_info: Optional[Exception] = None,
+        **kwargs: Any,
+    ) -> None:
+        context = self._context.copy()
 
-    def _log(self, level: int, message: str, **kwargs: Any) -> None:
-        try:
-            context = self._context.data.copy()
-        except AttributeError:
-            # Initialize data if it doesn't exist
-            self._context.data = {}
-            context = {}
         context.update(kwargs)
-        context_str = " ".join(f"{k}={v}" for k, v in context.items())
-        extra = {"context": context_str if context_str else "no_context"}
+
+        # Convert context to a JSON-friendly format
+        extra = {k: str(v) for k, v in context.items()}
+
+        # Add stack trace if exception info is provided
+        if exc_info:
+            extra["stack_trace"] = "".join(
+                traceback.format_exception(
+                    type(exc_info), exc_info, exc_info.__traceback__
+                )
+            )
+
         self.logger.log(level, message, extra=extra)
 
-    def debug(self, message: str, **kwargs: Any) -> None:
-        self._log(logging.DEBUG, message, **kwargs)
+    def debug(
+        self, message: str, exc_info: Optional[Exception] = None, **kwargs: Any
+    ) -> None:
+        self._log(logging.DEBUG, message, exc_info, **kwargs)
 
-    def info(self, message: str, **kwargs: Any) -> None:
-        self._log(logging.INFO, message, **kwargs)
+    def info(
+        self, message: str, exc_info: Optional[Exception] = None, **kwargs: Any
+    ) -> None:
+        self._log(logging.INFO, message, exc_info, **kwargs)
 
-    def warning(self, message: str, **kwargs: Any) -> None:
-        self._log(logging.WARNING, message, **kwargs)
+    def warning(
+        self, message: str, exc_info: Optional[Exception] = None, **kwargs: Any
+    ) -> None:
+        self._log(logging.WARNING, message, exc_info, **kwargs)
 
-    def error(self, message: str, **kwargs: Any) -> None:
-        self._log(logging.ERROR, message, **kwargs)
+    def error(
+        self, message: str, exc_info: Optional[Exception] = None, **kwargs: Any
+    ) -> None:
+        self._log(logging.ERROR, message, exc_info, **kwargs)
 
-    def critical(self, message: str, **kwargs: Any) -> None:
-        self._log(logging.CRITICAL, message, **kwargs)
+    def critical(
+        self, message: str, exc_info: Optional[Exception] = None, **kwargs: Any
+    ) -> None:
+        self._log(logging.CRITICAL, message, exc_info, **kwargs)
 
 
 # Create a singleton instance

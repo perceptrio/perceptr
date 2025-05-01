@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import List
 
 from common.enums import IntervalCategory, IntervalSeverity, IssueSortBy
-from common.middleware import GetPayload
+from common.middleware.auth_token import GetPayload
 from common.types import TokenPayload
 from core.constants import APIPath
 from database import get_db

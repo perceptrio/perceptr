@@ -1,23 +1,25 @@
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from typing import List
+
+from api.v1.recording import service
+from common.middleware.auth_token import GetPayload
+from common.services.s3 import s3_service
+from common.types import TokenPayload
 from core.constants import APIPath
+from database import get_db
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing_extensions import Annotated
+
 from .schema import (
+    DeleteFileBody,
+    RecordingCreateForUpload,
     RecordingDownloadUrl,
-    RecordingUploadUrl,
-    RecordingUploadUrlResponse,
     RecordingDownloadUrlResponse,
     RecordingResponse,
+    RecordingUploadUrl,
+    RecordingUploadUrlResponse,
 )
-from api.v1.recording import service
-from common.types import TokenPayload
-from typing_extensions import Annotated
-from common.middleware import GetPayload
-from sqlalchemy.orm import Session
-from database import get_db
-from typing import List
-from .schema import RecordingCreateForUpload, DeleteFileBody
-from fastapi import status
-from common.services.s3 import s3_service
 
 router = APIRouter(prefix=f"{APIPath.V1}/recordings", tags=["recordings"])
 
@@ -45,9 +47,7 @@ def get_recording_download_url(
     db: Session = Depends(get_db),
 ):
     print("key", recording_download_url.key)
-    url = service.get_recording_download_url(
-         payload.org.id, db, recording_download_url
-    )
+    url = service.get_recording_download_url(payload.org.id, db, recording_download_url)
     return RecordingDownloadUrlResponse(url=url)
 
 

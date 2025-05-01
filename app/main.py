@@ -1,6 +1,3 @@
-from contextlib import asynccontextmanager
-from typing import AsyncGenerator
-
 from api.v1.analytics.router import router as analytics_router
 from api.v1.email.router import router as email_router
 from api.v1.issue.router import router as issue_router
@@ -8,39 +5,15 @@ from api.v1.org.router import router as org_router
 from api.v1.per.router import router as per_router
 from api.v1.recording.router import router as recording_router
 from api.v1.recording_intervals.router import router as recording_interval_router
-from common.services.logger import logger
-from common.services.sqs_listener import get_sqs_listener
+from common.middleware.request_logger import RequestLoggerMiddleware
+from common.middleware.unhandled_exception import unhandled_exceptions_handler
+from common.services.sqs_listener import get_sqs_listener, lifespan
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    # Startup
-    try:
-        sqs_listener = get_sqs_listener()
-        # await sqs_listener.start()
-        # logger.info("SQS listener service started successfully")
-    except Exception as e:
-        logger.error(f"Failed to start SQS listener service: {str(e)}")
-
-    try:
-        yield
-    finally:
-        # Ensure cleanup happens in finally block
-        try:
-            sqs_listener = get_sqs_listener()
-            # await sqs_listener.stop()
-            # logger.info("SQS listener service stopped successfully")
-        except Exception as e:
-            logger.error(f"Error while stopping SQS listener service: {str(e)}")
-
-
 app = FastAPI(lifespan=lifespan)
 
-# # Create database tables
-# Base.metadata.create_all(bind=engine)
-
+app.add_middleware(RequestLoggerMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -58,6 +31,8 @@ app.include_router(analytics_router)
 app.include_router(email_router)
 # SDK router
 app.include_router(per_router)
+# Add exception handler for unhandled exceptions
+app.add_exception_handler(Exception, unhandled_exceptions_handler)
 
 
 @app.get("/health", response_model=dict[str, str])  # type: ignore

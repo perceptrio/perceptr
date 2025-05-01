@@ -54,7 +54,9 @@ def _get_or_create_recording(
         tuple: (recording, is_new)
     """
     logger.info(
-        f"Getting or creating recording for session: {snapshot_buffer.sessionId}"
+        "Getting or creating recording for session",
+        session_id=snapshot_buffer.sessionId,
+        org_id=org_id,
     )
     recording = recording_service.get_recording_by_session_id(
         snapshot_buffer.sessionId, org_id, db
@@ -85,7 +87,9 @@ def _get_or_create_recording(
         try:
             recording = recording_service.create_recording(db, recording)
             logger.info(
-                f"Created new recording for session: {snapshot_buffer.sessionId}"
+                "Created new recording for session",
+                session_id=snapshot_buffer.sessionId,
+                org_id=org_id,
             )
             return recording, True
         except Exception as e:
@@ -96,7 +100,9 @@ def _get_or_create_recording(
                 or "duplicate key" in str(e).lower()
             ):
                 logger.info(
-                    f"Race condition detected for session: {snapshot_buffer.sessionId}"
+                    "Race condition detected for session",
+                    session_id=snapshot_buffer.sessionId,
+                    org_id=org_id,
                 )
                 db.rollback()  # Roll back the failed transaction
                 recording = recording_service.get_recording_by_session_id(
@@ -153,31 +159,41 @@ def _process_events_background(
         # Get a fresh recording instance in this session
         recording = recording_service.get_recording(db, recording_id, org_id)
         if not recording:
-            logger.error(f"Recording {recording_id} not found in background task")
+            logger.error(
+                "Recording not found in background task",
+                recording_id=recording_id,
+                org_id=org_id,
+            )
             return
 
-        # Upload events to S3
+        # Process events and upload to S3
+        json_line = snapshot_buffer.model_dump_json()
         s3_path = f"{org_id}/{snapshot_buffer.sessionId}/events.jsonl.gz"
-        json_line = json.dumps(snapshot_buffer.model_dump()) + "\n"
         _update_recording_file(db, recording, s3_path, json_line)
 
-        # If session ended, schedule analysis
-        if snapshot_buffer.isSessionEnded:
-            recording.analysis_status = AnalysisStatus.IN_PROGRESS.value
-            recording = recording_service.update_recording(db, recording)
-            logger.info(
-                f"Session ended, analysis in progress: {snapshot_buffer.sessionId}"
-            )
-            # Schedule analysis as a nested background task
-            background_tasks.add_task(
-                schedule_session_analysis,
-                db,
-                org_id,
-                recording_id,
-                snapshot_buffer.sessionId,
-            )
+        logger.info(
+            "Events processed successfully",
+            session_id=snapshot_buffer.sessionId,
+            org_id=org_id,
+            recording_id=recording_id,
+        )
+
+        # Schedule analysis as a nested background task
+        background_tasks.add_task(
+            schedule_session_analysis,
+            db,
+            org_id,
+            recording_id,
+            snapshot_buffer.sessionId,
+        )
     except Exception as e:
-        logger.error(f"Error processing events in background: {str(e)}")
+        logger.error(
+            "Error processing events in background",
+            exc_info=e,
+            session_id=snapshot_buffer.sessionId,
+            org_id=org_id,
+            recording_id=recording_id,
+        )
         try:
             # Get a fresh recording instance for error handling
             recording = recording_service.get_recording(db, recording_id, org_id)
@@ -186,7 +202,14 @@ def _process_events_background(
                 recording.analysis_error = str(e)
                 recording_service.update_recording(db, recording)
         except Exception as inner_e:
-            logger.error(f"Error updating recording status: {str(inner_e)}")
+            logger.error(
+                "Error updating recording status",
+                exc_info=inner_e,
+                session_id=snapshot_buffer.sessionId,
+                org_id=org_id,
+                recording_id=recording_id,
+                original_error=str(e),
+            )
 
 
 def _create_recording_from_session(
@@ -213,7 +236,12 @@ def _process_session_background(
     """Background task to process a session"""
 
     try:
-        logger.info(f"Processing session {session_id}")
+        logger.info(
+            "Processing session started",
+            session_id=session_id,
+            org_id=org_id,
+            recording_id=recording.id,
+        )
 
         # Download the session batches
         with FilesDownloader(
@@ -222,12 +250,18 @@ def _process_session_background(
             session_prefix = f"{org_id}/{session_id}/"
             local_file_paths = downloader.download_all_session_batches(session_prefix)
             logger.info(
-                f"Downloaded {len(local_file_paths)} files for session {session_id}"
+                "Session files downloaded",
+                session_id=session_id,
+                file_count=len(local_file_paths),
             )
-            # Process the files
 
+            # Process the files
             merged_file_path = merge_rrweb_batches(local_file_paths)
-            logger.info(f"Merged file saved to {merged_file_path}")
+            logger.info(
+                "Files merged successfully",
+                session_id=session_id,
+                output_path=merged_file_path,
+            )
 
             # Upload the merged file to S3
             s3_path = f"{org_id}/{session_id}/events.json.gzip"
@@ -241,43 +275,58 @@ def _process_session_background(
             session = RRWebSessionUtils(merged_file_path)
 
             # Print session summary
-            logger.info(session.get_session_summary())
-            logger.info(f"Start time: {session.get_start_time()}")
-            logger.info(f"End time: {session.get_end_time()}")
-            duration = session.get_duration()
-            logger.info(f"Duration: {duration}")
-            logger.info(f"Events: {len(session.get_events())}")
-            logger.info(f"User identity: {session.get_user_identity()}")
+            logger.info(
+                "Session summary",
+                session_id=session_id,
+                summary=session.get_session_summary(),
+                start_time=session.get_start_time(),
+                end_time=session.get_end_time(),
+                duration=session.get_duration(),
+                event_count=len(session.get_events()),
+                user_identity=session.get_user_identity(),
+            )
 
             # Skip sessions with 0 duration
-            if duration == "00:00:00":
+            if session.get_duration() == "00:00:00":
                 logger.info(
-                    f"Skipping analysis for session {session_id} with 0 duration"
+                    "Skipping analysis for zero duration session", session_id=session_id
                 )
                 return
 
             # Convert to video
-            logger.info("\nConverting session to video...")
+            logger.info("Starting video conversion", session_id=session_id)
             result = session.convert_events_to_video()
 
             if result["success"]:
-                logger.info(f"Video saved to: {result['output_path']}")
+                logger.info(
+                    "Video conversion successful",
+                    session_id=session_id,
+                    output_path=result["output_path"],
+                )
                 if settings.AI_ANALYSIS_ENABLED:
                     recording_service.analyze_local_recording_video(
                         db, org_id, recording.id, recording, result["output_path"]
                     )
                 else:
-                    logger.info("AI analysis is disabled, skipping analysis")
+                    logger.info(
+                        "AI analysis skipped - disabled in settings",
+                        session_id=session_id,
+                    )
             else:
-                logger.error("\nVideo conversion failed!")
-                if "error" in result:
-                    logger.error(f"Error: {result['error']}")
-                else:
-                    logger.error(f"Message: {result['message']}")
-                raise Exception(f"Video conversion failed: {result['error']}")
+                error_msg = result.get("error", result.get("message", "Unknown error"))
+                logger.error(
+                    "Video conversion failed", session_id=session_id, error=error_msg
+                )
+                raise Exception(f"Video conversion failed: {error_msg}")
 
     except Exception as e:
-        logger.error(f"Error processing session {session_id}: {str(e)}")
+        logger.error(
+            "Error processing session",
+            exc_info=e,
+            session_id=session_id,
+            org_id=org_id,
+            recording_id=recording.id,
+        )
         recording = recording_service.get_recording(db, recording.id, org_id)
         recording.analysis_status = AnalysisStatus.FAILED.value
         recording.analysis_error = str(e)
@@ -306,7 +355,13 @@ def process_session(
 
         return {"success": True, "message": "Session scheduled for processing"}
     except Exception as e:
-        logger.error(f"Error processing session {session_id}: {str(e)}")
+        logger.error(
+            "Error processing session",
+            exc_info=e,
+            session_id=session_id,
+            org_id=org_id,
+            recording_id=recording.id,
+        )
         raise
 
 
@@ -360,7 +415,7 @@ def schedule_session_analysis(
     db: Session, org_id: int, recording_id: int, session_id: str
 ) -> None:
     """Background task to trigger session analysis"""
-    logger.info(f"TODO: Implement session analysis for {session_id}")
+    logger.info(f"TODO: Implement session analysis", session_id=session_id)
     recording = recording_service.get_recording(db, recording_id, org_id)
     s3_path = f"{org_id}/{session_id}/events.jsonl.gz"
     with FilesDownloader(s3_service.get_s3_client(), keep_temp_dir=False) as downloader:
@@ -374,30 +429,44 @@ def schedule_session_analysis(
         json_path = local_file_path.replace(".jsonl.gz", ".json")
         _decompress_and_save_json(compressed_content, json_path)
 
-        logger.info(f"Saved JSON events to {json_path}")
+        logger.info(
+            "Saved JSON events",
+            session_id=session_id,
+            json_path=json_path,
+        )
 
         session = RRWebSessionUtils(json_path)
 
         # Print session summary
-        logger.info(session.get_session_summary())
-        logger.info(f"Start time: {session.get_start_time()}")
-        logger.info(f"End time: {session.get_end_time()}")
         duration = session.get_duration()
-        logger.info(f"Duration: {duration}")
-        logger.info(f"Events: {len(session.get_events())}")
-        logger.info(f"User identity: {session.get_user_identity()}")
-
+        logger.info(
+            "Session summary",
+            session_id=session_id,
+            summary=session.get_session_summary(),
+            start_time=session.get_start_time(),
+            end_time=session.get_end_time(),
+            duration=duration,
+            event_count=len(session.get_events()),
+            user_identity=session.get_user_identity(),
+        )
         # Skip sessions with 0 duration
         if duration == "00:00:00":
-            logger.info(f"Skipping analysis for session {session_id} with 0 duration")
+            logger.info(
+                "Skipping analysis for session with 0 duration",
+                session_id=session_id,
+            )
             return
 
         # Convert to video
-        logger.info("\nConverting session to video...")
+        logger.info("Converting session to video...")
         result = session.convert_events_to_video()
 
         if result["success"]:
-            logger.info(f"Video saved to: {result['output_path']}")
+            logger.info(
+                "Video saved",
+                session_id=session_id,
+                output_path=result["output_path"],
+            )
             if settings.AI_ANALYSIS_ENABLED:
                 recording_service.analyze_local_recording_video(
                     db, org_id, recording_id, recording, result["output_path"]
@@ -405,8 +474,16 @@ def schedule_session_analysis(
             else:
                 logger.info("AI analysis is disabled, skipping analysis")
         else:
-            logger.error("\nVideo conversion failed!")
+            logger.error("Video conversion failed!", session_id=session_id)
             if "error" in result:
-                logger.error(f"Error: {result['error']}")
+                logger.error(
+                    "Video conversion failed",
+                    session_id=session_id,
+                    error=result["error"],
+                )
             else:
-                logger.error(f"Message: {result['message']}")
+                logger.error(
+                    "Video conversion failed",
+                    session_id=session_id,
+                    message=result["message"],
+                )
