@@ -44,7 +44,7 @@ def _create_recording_from_session(
         org_id=org_id,
         session_id=session_id,
         file_name=f"{session_id}/events.json.gzip",
-        file_type=VideoType.JSON.value,
+        file_type=VideoType.WEBM.value,
         file_size=0,
         analysis_status=AnalysisStatus.IN_PROGRESS.value,
     )
