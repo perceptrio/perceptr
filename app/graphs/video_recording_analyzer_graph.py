@@ -11,7 +11,6 @@ from langfuse.decorators import langfuse_context, observe
 from langgraph.graph import END, START, StateGraph
 from settings import settings
 
-# from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
 os.environ["LANGFUSE_PUBLIC_KEY"] = settings.LANGFUSE_PUBLIC_KEY
@@ -21,7 +20,6 @@ os.environ["LANGFUSE_HOST"] = settings.LANGFUSE_HOST
 import numpy as np
 from google import genai
 from pydantic import BaseModel, Field
-from utils.graph import map_timestamped_frames_to_messages
 
 
 class TimestampDescription(BaseModel):
