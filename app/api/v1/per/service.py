@@ -69,7 +69,7 @@ def _process_session_background(
 
         # Download the session batches
         with FilesDownloader(
-            s3_service.get_s3_client(), keep_temp_dir=True
+            s3_service.get_s3_client(), keep_temp_dir=False
         ) as downloader:
             session_prefix = f"{org_id}/{session_id}/"
             local_file_paths = downloader.download_all_session_batches(session_prefix)
