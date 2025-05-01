@@ -1,6 +1,5 @@
 import re
 
-from common.enums import AnalysisStatus
 from common.services.s3 import s3_service
 from core.constants import APIPath
 from database import get_db
@@ -8,7 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from . import service
-from .schema import BatchUrlResponse, GenericResponse, SnapshotBuffer
+from .schema import BatchUrlResponse, GenericResponse
 
 router = APIRouter(prefix=f"{APIPath.V1}/per", tags=["sdk-api"])
 
@@ -30,37 +29,6 @@ def check_project_id(
 
 # r == recording
 RECORDING_PATH = "/{project_id}/r"
-
-
-@router.post(  # type: ignore
-    RECORDING_PATH + "/events",
-    response_model=GenericResponse,
-)
-async def record_events(
-    project_id: str,
-    snapshot_buffer: SnapshotBuffer,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
-) -> GenericResponse:
-    """Record events from the SDK"""
-    # Validate project ID
-    org = service.get_org_by_project_id(db, project_id)
-    if org is None:
-        raise HTTPException(status_code=400, detail="Invalid project id")
-
-    try:
-        # Process the events
-        service.process_events(db, org.id, snapshot_buffer, background_tasks)
-        return GenericResponse(success=True, message="Events recorded successfully")
-    except Exception as e:
-        # Log the error
-        import traceback
-
-        traceback.print_exc()
-        # Return a friendly error
-        return GenericResponse(
-            success=False, message=f"Failed to process events: {str(e)}"
-        )
 
 
 @router.post(  # type: ignore
