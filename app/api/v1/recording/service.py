@@ -382,7 +382,8 @@ def analyze_recording(
         recording = repository.get_by_id(recording_id, org_id)
         if not recording:
             raise ValueError(f"Recording {recording_id} not found")
-
+        recording.set_analysis_status(AnalysisStatus.IN_PROGRESS)
+        repository.update(recording)
         with FilesDownloader(s3_service.get_s3_client()) as downloader:
             local_recording_path = downloader.download_file_from_s3(
                 f"{org_id}/{recording.file_name}"
