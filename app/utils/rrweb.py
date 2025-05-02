@@ -157,6 +157,7 @@ class RRWebSessionUtils:
                 "events_file": events_file_path,
             }
 
+
 def merge_rrweb_batches(file_paths: List[str]) -> str:
     """
     Merge RRWeb batches into a single file.
@@ -167,24 +168,35 @@ def merge_rrweb_batches(file_paths: List[str]) -> str:
     Returns:
         str: Path to the merged file
     """
-    rrweb_json = {
-        "sessionId": "",
-        "startTime": "",
-        "endTime": "",
-        "data": []
-    }
-
+    rrweb_json = {"sessionId": "", "startTime": "", "endTime": "", "data": []}
+    seen_events = set()
     for file_path in file_paths:
         with open(file_path, "r") as f:
             data = json.load(f)
+            # Set session ID once
             if rrweb_json["sessionId"] == "":
                 rrweb_json["sessionId"] = data["sessionId"]
-            if rrweb_json["startTime"] == "":
-                rrweb_json["startTime"] = data["startTime"]
-            if rrweb_json["endTime"] == "":
-                rrweb_json["endTime"] = data["endTime"]
-            rrweb_json["data"].extend(data["data"])
-    
+
+            # Update session time boundaries
+            rrweb_json["startTime"] = (
+                data["startTime"]
+                if rrweb_json["startTime"] == ""
+                else min(rrweb_json["startTime"], data["startTime"])
+            )
+            rrweb_json["endTime"] = (
+                data["endTime"]
+                if rrweb_json["endTime"] == ""
+                else max(rrweb_json["endTime"], data["endTime"])
+            )
+            for event in data["data"]:
+                # Serialize the event for deduplication (you can customize this)
+                event_key = json.dumps(event, sort_keys=True)
+                if event_key not in seen_events:
+                    rrweb_json["data"].append(event)
+                    seen_events.add(event_key)
+
+    # Sort events by timestamp to ensure correct order
+    rrweb_json["data"].sort(key=lambda e: e.get("timestamp", 0))
     output_path = file_paths[0].split("batch_")[0] + "events.json"
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(rrweb_json, f, indent=2)

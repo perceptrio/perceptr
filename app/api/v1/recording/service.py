@@ -10,6 +10,7 @@ from common.enums import AnalysisStatus, RecordingType, VideoType
 from common.services.files_downloader import FilesDownloader
 from common.services.logger import logger
 from common.services.s3 import s3_service
+from core.constants import SDK_FILE_EXTENSION
 from fastapi import HTTPException, status
 from graphs.issues_summarizer_graph import IssuesSummarizerGraph
 from graphs.video_recording_analyzer_graph import VideoRecordingAnalyzerGraph
@@ -19,6 +20,7 @@ from models.recording import Recording
 from models.recording_interval import RecordingInterval
 from sqlalchemy.orm import Session
 from utils.recording import get_recording_duration
+
 from .repository import RecordingRepository
 from .schema import (
     RecordingCreate,
@@ -110,13 +112,20 @@ def get_recording_upload_url(
     extension = convert_video_type_to_extension(recording_upload_url.content_type)
     rec_type = recording_upload_url.recording_type.value
     key = f"{recording_name}/{rec_type}{extension}"
-    file_path = f"{org_id}/recordings/{key}"
+    file_path = f"{org_id}/{key}"
     upload_url = s3_service.get_upload_url(
         file_path,
         recording_upload_url.content_type,
         recording_upload_url.expiration,
     )
     return (upload_url, key)
+
+
+def get_recording_download_type(recording_download_url: RecordingDownloadUrl) -> str:
+    if recording_download_url.key.endswith(SDK_FILE_EXTENSION):
+        return "sdk"
+    else:
+        return "video"
 
 
 def get_recording_download_url(
@@ -136,7 +145,7 @@ def get_recording_download_url(
     service.get_org(db, org_id)
 
     # Generate S3 path and URL
-    file_path = f"{org_id}/recordings/{recording_download_url.key}"
+    file_path = f"{org_id}/{recording_download_url.key}"
     download_url = s3_service.get_download_url(
         file_path, recording_download_url.expiration
     )
@@ -376,7 +385,7 @@ def analyze_recording(
 
         with FilesDownloader(s3_service.get_s3_client()) as downloader:
             local_recording_path = downloader.download_file_from_s3(
-                f"{org_id}/recordings/{recording.file_name}"
+                f"{org_id}/{recording.file_name}"
             )
 
             analyze_local_recording_video(

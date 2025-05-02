@@ -4,12 +4,14 @@ import traceback
 from typing import Any, Optional
 
 from pythonjsonlogger import jsonlogger
+from settings import settings
 
 # Disable FastAPI's default error logging
-uvicorn_access = logging.getLogger("uvicorn.access")
-uvicorn_access.disabled = True
-uvicorn_error = logging.getLogger("uvicorn.error")
-uvicorn_error.disabled = True
+if settings.LOG_STYLE == "json":
+    uvicorn_access = logging.getLogger("uvicorn.access")
+    uvicorn_access.disabled = True
+    uvicorn_error = logging.getLogger("uvicorn.error")
+    uvicorn_error.disabled = True
 
 
 class ContextLogger:
@@ -30,8 +32,12 @@ class ContextLogger:
 
         # Create JSON handler with formatting
         handler = logging.StreamHandler()
-        formatter = jsonlogger.JsonFormatter(
-            fmt="%(asctime)s %(levelname)s %(message)s %(stack_trace)s"
+        formatter = (
+            jsonlogger.JsonFormatter(
+                fmt="%(asctime)s %(levelname)s %(message)s %(stack_trace)s"
+            )
+            if settings.LOG_STYLE == "json"
+            else logging.Formatter(fmt="%(asctime)s %(levelname)s %(message)s")
         )
         handler.setFormatter(formatter)
         self.logger.addHandler(handler)
@@ -59,13 +65,14 @@ class ContextLogger:
         extra = {k: str(v) for k, v in context.items()}
 
         # Add stack trace if exception info is provided
-        if exc_info:
+        if exc_info and settings.LOG_STYLE == "json":
             extra["stack_trace"] = "".join(
                 traceback.format_exception(
                     type(exc_info), exc_info, exc_info.__traceback__
                 )
             )
-
+        if settings.LOG_STYLE != "json":
+            message = f"{message} {','.join(f'{k}: {v}' for k, v in extra.items())}"
         self.logger.log(level, message, extra=extra)
 
     def debug(
