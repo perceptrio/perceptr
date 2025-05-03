@@ -1,31 +1,18 @@
 import gzip
 import io
 
-from api.v1.org import service as org_service
 from api.v1.recording import service as recording_service
 from api.v1.recording.schema import RecordingCreate
 from common.enums import AnalysisStatus, VideoType
 from common.services.files_downloader import FilesDownloader
 from common.services.logger import logger
 from common.services.s3 import s3_service
+from core.constants import SDK_FILE_EXTENSION
 from fastapi import BackgroundTasks
-from models.org import Org
 from models.recording import Recording
 from settings import settings
 from sqlalchemy.orm import Session
 from utils.rrweb import RRWebSessionUtils, merge_rrweb_batches
-
-
-def get_org_by_project_id(db: Session, project_id: str) -> Org:
-    """Get organization by project ID"""
-    return org_service.get_org_by_project_id(db, project_id)
-
-
-def get_recording_by_session_id(db: Session, org_id: int, session_id: str) -> Recording:
-    """Get recording by session ID"""
-    return recording_service.get_recording_by_session_id(
-        session_id=session_id, org_id=org_id, db=db
-    )
 
 
 def _compress_content(content: str) -> bytes:
@@ -36,33 +23,59 @@ def _compress_content(content: str) -> bytes:
     return compressed_content.getvalue()
 
 
-def _create_recording_from_session(
-    db: Session, org_id: int, session_id: str
+def get_or_create_recording_from_session(
+    db: Session, org_id: int, session_id: str, force: bool = False
 ) -> Recording:
-    """Create a recording from a session"""
-    recording = RecordingCreate(
-        org_id=org_id,
-        session_id=session_id,
-        file_name=f"{session_id}/events.json.gzip",
-        file_type=VideoType.WEBM.value,
-        file_size=0,
-        analysis_status=AnalysisStatus.IN_PROGRESS.value,
+    # First check if recording already exists for this session
+    existing_recording = recording_service.get_recording_by_session_id(
+        session_id, org_id, db
     )
-    return recording_service.create_recording(db, recording)
+
+    if existing_recording:
+        if (
+            existing_recording.analysis_status != AnalysisStatus.PENDING.value
+            and existing_recording.analysis_status != AnalysisStatus.FAILED.value
+            and not force
+        ):
+            return {
+                "success": True,
+                "message": f"Session already processed",
+            }
+
+        # If recording exists, use it
+        recording = existing_recording
+        logger.info(
+            "Using existing recording",
+            session_id=session_id,
+            org_id=org_id,
+            recording_id=recording.id,
+        )
+        return recording
+    else:
+        # Create new recording if none exists
+        """Create a recording from a session"""
+        recordingCreate = RecordingCreate(
+            org_id=org_id,
+            session_id=session_id,
+            file_name=f"{session_id}/{SDK_FILE_EXTENSION}",
+            file_type=VideoType.WEBM.value,
+            file_size=0,
+            analysis_status=AnalysisStatus.IN_PROGRESS.value,
+        )
+        return recording_service.create_recording(db, recordingCreate)
 
 
 def _process_session_background(
     db: Session,
     org_id: int,
-    session_id: str,
     recording: Recording,
 ) -> None:
     """Background task to process a session"""
-
+    session_id = recording.session_id
     try:
         logger.info(
             "Processing session started",
-            session_id=session_id,
+            session_id=recording.session_id,
             org_id=org_id,
             recording_id=recording.id,
         )
@@ -88,7 +101,7 @@ def _process_session_background(
             )
 
             # Upload the merged file to S3
-            s3_path = f"{org_id}/{session_id}/events.json.gzip"
+            s3_path = f"{org_id}/{session_id}/{SDK_FILE_EXTENSION}"
             with open(merged_file_path, "rb") as f:
                 content = f.read()
                 # Decode bytes to string before compression
@@ -160,20 +173,15 @@ def _process_session_background(
 def process_session(
     db: Session,
     org_id: int,
-    session_id: str,
+    recording: Recording,
     background_tasks: BackgroundTasks,
 ) -> dict:
     """Process a session"""
     try:
-        recording = _create_recording_from_session(db, org_id, session_id)
-        if not recording:
-            raise ValueError("Failed to create recording")
-
         background_tasks.add_task(
             _process_session_background,
             db,
             org_id,
-            session_id,
             recording,
         )
 
@@ -182,9 +190,7 @@ def process_session(
         logger.error(
             "Error processing session",
             exc_info=e,
-            session_id=session_id,
+            session_id=recording.session_id,
             org_id=org_id,
-            recording_id=recording.id,
         )
         raise
-

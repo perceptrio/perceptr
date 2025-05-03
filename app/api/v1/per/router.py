@@ -1,5 +1,9 @@
 import re
 
+from api.v1.org import service as org_service
+from api.v1.recording import service as recording_service
+from common.enums import AnalysisStatus
+from common.services.logger import logger
 from common.services.s3 import s3_service
 from core.constants import APIPath
 from database import get_db
@@ -21,7 +25,7 @@ def check_project_id(
     db: Session = Depends(get_db),
 ) -> GenericResponse:
     """Check if the project id is valid"""
-    org = service.get_org_by_project_id(db, project_id)
+    org = org_service.get_org_by_project_id(db, project_id)
     if org is None:
         raise HTTPException(status_code=400, detail="Invalid project id")
     return GenericResponse(success=True)
@@ -35,25 +39,29 @@ RECORDING_PATH = "/{project_id}/r"
     RECORDING_PATH + "/{session_id}/process",
     response_model=GenericResponse,
 )
-async def process_session(
+async def process_session_api(
     project_id: str,
     session_id: str,
     background_tasks: BackgroundTasks,
+    force: bool = False,
     db: Session = Depends(get_db),
 ) -> GenericResponse:
     """Trigger a session"""
     # Validate project ID
-    org = service.get_org_by_project_id(db, project_id)
+    org = org_service.get_org_by_project_id(db, project_id)
     if org is None:
         raise HTTPException(status_code=400, detail="Invalid project id")
-
+    recording = service.get_or_create_recording_from_session(
+        db, org.id, session_id, force
+    )
+    if recording is None:
+        raise HTTPException(status_code=400, detail="Failed to get or create recording")
     try:
-        service.process_session(db, org.id, session_id, background_tasks)
+        service.process_session(db, org.id, recording, background_tasks)
         return GenericResponse(success=True, message="Session triggered successfully")
     except Exception as e:
-        raise HTTPException(
-            status_code=400, detail=f"Failed to process session: {str(e)}"
-        )
+        logger.error(f"Failed to process session", exc_info=e)
+        raise HTTPException(status_code=400, detail=f"Failed to process session")
 
 
 @router.get(  # type: ignore
@@ -67,10 +75,12 @@ async def get_batch_upload_url(
 ) -> BatchUrlResponse:
     """Generate a presigned URL for batch upload with automatic batch numbering"""
     # Validate project ID and get org
-    org = service.get_org_by_project_id(db, project_id)
+    org = org_service.get_org_by_project_id(db, project_id)
     if org is None:
         raise HTTPException(status_code=400, detail="Invalid project id")
-
+    recording = recording_service.get_recording_by_session_id(session_id, org.id, db)
+    if recording and recording.analysis_status != AnalysisStatus.PENDING.value:
+        raise HTTPException(status_code=400, detail="processing already started")
     try:
         # List existing batches for this session
         session_prefix = f"{org.id}/{session_id}/"

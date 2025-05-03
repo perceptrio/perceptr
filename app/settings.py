@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     LANGFUSE_PRIVATE_KEY: str
     LANGFUSE_HOST: str
 
+    LOG_STYLE: str = "json"
     # Database settings
     DATABASE_URL: str = "postgresql://user:password123@localhost:5432/perceptr"
 

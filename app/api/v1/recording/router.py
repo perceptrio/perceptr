@@ -46,9 +46,9 @@ def get_recording_download_url(
     payload: Annotated[TokenPayload, Depends(GetPayload(type="access"))],
     db: Session = Depends(get_db),
 ):
-    print("key", recording_download_url.key)
     url = service.get_recording_download_url(payload.org.id, db, recording_download_url)
-    return RecordingDownloadUrlResponse(url=url)
+    type = service.get_recording_download_type(recording_download_url)
+    return RecordingDownloadUrlResponse(url=url, type=type)
 
 
 @router.post("/", response_model=RecordingResponse)

@@ -22,6 +22,7 @@ class RecordingDownloadUrl(BaseModel):
 
 class RecordingDownloadUrlResponse(BaseModel):
     url: str
+    type: str  # 'sdk' or 'video'
 
 
 class RecordingCreate(BaseModel):
