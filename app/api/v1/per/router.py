@@ -42,8 +42,8 @@ RECORDING_PATH = "/{project_id}/r"
 async def process_session_api(
     project_id: str,
     session_id: str,
-    force: bool,
     background_tasks: BackgroundTasks,
+    force: bool = False,
     db: Session = Depends(get_db),
 ) -> GenericResponse:
     """Trigger a session"""
