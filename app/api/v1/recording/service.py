@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, time
-from typing import Any, Callable, List, Optional, Tuple, TypeVar, cast
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar, cast
 
 from api.v1.issue.repository import IssueRepository
 from api.v1.issue_recording.repository import IssueRecordingRepository
@@ -19,7 +19,7 @@ from models.issue_recording import IssueRecording
 from models.recording import Recording
 from models.recording_interval import RecordingInterval
 from sqlalchemy.orm import Session
-from utils.recording import get_recording_duration
+from utils.recording import get_file_size, get_recording_duration
 
 from .repository import RecordingRepository
 from .schema import (
@@ -304,7 +304,7 @@ def process_issues(
     db: Session,
     org_id: int,
     recording_id: int,
-    analyzed_intervals: List[RecordingInterval],
+    findings: List[Dict[str, Any]],
 ) -> None:
     issue_repository = IssueRepository(db)
     issue_recording_repository = IssueRecordingRepository(db)
@@ -323,20 +323,9 @@ def process_issues(
                 "issue_category": issue.category,
             }
         )
-    analyzed_recording_issues = []
-    for interval in analyzed_intervals:
-        if interval.category == "NORMAL":
-            continue
 
-        analyzed_recording_issues.append(
-            {
-                "recording_interval_id": interval.id,
-                "issue": interval.issue,
-                "category": interval.category,
-            }
-        )
     response = issues_summarizer_graph.aggregate_issues(
-        org_id, recording_id, analyzed_recording_issues, existing_issues
+        org_id, recording_id, findings, existing_issues
     )
 
     for aggregated_issue in response["aggregated_issues"].issues:
@@ -415,6 +404,19 @@ def analyze_recording(
             repository.update(recording)
         return None
 
+def process_intervals_findings(analyzed_intervals: List[RecordingInterval], timestamp_intervals) -> List:
+    all_findings = []
+    for analyzed_interval, timestamp_interval in zip(analyzed_intervals, timestamp_intervals):
+        if analyzed_interval.category == "NORMAL":
+            continue
+        for finding in timestamp_interval.findings:
+            all_findings.append({
+                "recording_interval_id": analyzed_interval.id,
+                "description": finding.description,
+                "category": finding.category,
+            })
+
+    return all_findings
 
 @post_analysis_process()
 def analyze_local_recording_video(
@@ -501,13 +503,21 @@ def analyze_local_recording_video(
                 )
                 end_time_obj = time(0, 0, 0)
 
+            findings = interval_data.findings
+            if findings and len(findings) > 0:
+                category = "BUG"
+                issue = ""
+            else:
+                category = "NORMAL"
+                issue = None
+
             analyzed_intervals.append(
                 RecordingInterval(
                     recording_id=recording_id,
                     start_time=start_time_obj,  # Use converted time object
                     end_time=end_time_obj,  # Use converted time object
-                    category=interval_data.category,
-                    issue=interval_data.issue,
+                    category=category,
+                    issue=issue,
                     short_title=interval_data.short_title,
                     timestamp_descriptions=processed_timestamp_descriptions_json,  # Use processed JSON list
                     description=interval_data.description,
@@ -549,7 +559,8 @@ def analyze_local_recording_video(
         if recording_has_issues(analyzed_intervals):
             logger.info(f"Processing issues for recording {recording_id}")
             # Ensure analyzed_intervals have IDs if process_issues requires them
-            process_issues(db, org_id, recording_id, analyzed_intervals)
+            all_findings = process_intervals_findings(analyzed_intervals, recording_analysis.intervals)
+            process_issues(db, org_id, recording_id, all_findings)
             issues = issue_repository.get_issues_by_recording(org_id, recording_id)
             categories = [issue.category for issue in issues]
             recording.tags = process_tags(categories)
@@ -572,6 +583,7 @@ def analyze_local_recording_video(
                     f"Could not determine duration for {local_recording_path}: {dur_err}"
                 )
 
+        recording.file_size = get_file_size(local_recording_path)
         repository.update(recording)
 
         logger.info(f"Video analysis completed for recording {recording_id}")

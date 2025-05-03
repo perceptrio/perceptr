@@ -24,25 +24,22 @@ from pydantic import BaseModel, Field
 
 class TimestampDescription(BaseModel):
     """A timestamp in the recording. Use the timestamp to describe the user's actions. Don't miss any timestamp."""
-
     description: str = Field(
         description="A detailed description of the user's actions, and what's happening on the screen."
     )
-    ui_design_feedback: Optional[str] = Field(
-        description="Observations and recommendations focused solely on the UI elements and overall visual design of the screenshot. Assess aspects such as layout, alignment, color contrast, typography, spacing, and responsiveness. Note any areas where the design could be optimized, improved, or clarified. If no visual feedback is required, leave this field empty. No need for positive feedback, only feedback on what could be improved."
-    )
     timestamp: str = Field(description="The timestamp in the recording. Format: MM:SS")
 
-
-# class RecordingAnalysis(BaseModel):
-#     """The analysis of the recording."""
-#     timestamp_descriptions: List[TimestampDescription] = Field(description="A list of timestamp descriptions.")
-#     summary: str = Field(description="A summary of the user's behavior, emotional state, and recommendations for improvement.")
-
+class Finding(BaseModel): # Renamed from Insight
+    """A finding identified from the recording."""
+    description: str = Field(
+        description="A detailed description of the finding." # Updated description
+    )
+    category: str = Field(
+        description="The category of the finding. Can be one of: BUG, USABILITY_ISSUE, PERFORMANCE_ISSUE, ENHANCEMENT" # Updated description
+    )
 
 class TimestampInterval(BaseModel):
     """A timestamp interval in the recording."""
-
     start_time: str = Field(
         description="The start time of the interval in the recording. Format: MM:SS"
     )
@@ -50,31 +47,27 @@ class TimestampInterval(BaseModel):
         description="The end time of the interval in the recording. Format: MM:SS"
     )
     description: str = Field(
-        description="A detailed description of the user's actions in the interval."
+        description="A detailed description of the user's actions and system behavior within the interval." # Slightly refined description
     )
-    issue: Optional[str] = Field(
-        description="The issue found in the interval. If there is no issue, leave it empty."
+    findings: Optional[List[Finding]] = Field( # Renamed from insights, updated type hint
+        default=None, # Explicitly default to None if preferred over implicit Optional behavior
+        description="A list of findings identified during this interval. If there are no findings, leave it empty or null." # Updated description
     )
-    category: str = Field(
-        description="The category of the interval. Can be one of: NORMAL, BUG, USABILITY_ISSUE, PERFORMANCE_ISSUE, ENHANCEMENT"
-    )
-    short_title: str = Field(description="A short title for the interval.")
+    short_title: str = Field(description="A short title summarizing the main activity or purpose of the interval.") # Slightly refined description
     timestamp_descriptions: List[TimestampDescription] = Field(
-        description="A list of timestamp description in the interval. Don't miss any timestamp."
+        description="A list of timestamp descriptions for every distinct timestamp/frame within the interval. Don't miss any." # Updated description
     )
-
 
 class RecordingAnalysis(BaseModel):
-    """The intervals of the recording."""
-
+    """The analysis of the user session recording, broken down into intervals.""" # Slightly refined description
     intervals: List[TimestampInterval] = Field(
-        description="The intervals of the recording."
+        description="A list of logical intervals covering the entire recording." # Updated description
     )
     summary: str = Field(
-        description="A summary of the user's actions, behavior, emotional state. Also include any issues found in the recording and recommendations for improvement."
+        description="A concise summary of the user's overall journey, key actions, observed emotional state (if discernible), main findings (issues/opportunities), and actionable recommendations." # Updated description
     )
     title: str = Field(
-        description="A title for the recording. It should be a short description of the user's actions, behavior, emotional state."
+        description="A title for the recording analysis, summarizing the main user task or overall session theme." # Updated description
     )
 
 
@@ -112,50 +105,6 @@ class VideoRecordingAnalyzerGraph:
 
         self.graph = graph_builder.compile()
 
-    # def gemini_recording_analyzer(self, recording_path: str):
-    #     logger.info("Uploading file...")
-    #     uploaded_recording = genai.upload_file(path=recording_path)
-    #     logger.info(f"Completed upload: {uploaded_recording.uri}")
-
-    #     # Check whether the file is ready to be used.
-    #     while uploaded_recording.state.name == "PROCESSING":
-    #         print('.', end='')
-    #         time.sleep(5)
-    #         uploaded_recording = genai.get_file(uploaded_recording.name)
-
-    #     if uploaded_recording.state.name == "FAILED":
-    #         raise ValueError(uploaded_recording.state.name)
-
-    #     logger.info(f"File ready: {uploaded_recording.uri}")
-
-    #     # Create the prompt.
-    #     prompt =  """You are an expert UI/UX Researcher analyzing a user session.
-    #     For each timestamp in the recording, provide a detailed analysis of the user's behavior and emotional state.
-
-    #      Focus on:
-    #                 1. Signs of user frustration (rapid movements, rage clicks)
-    #                 2. Navigation patterns and hesitation points
-    #                 3. Areas where the user seems confused or stuck
-    #                 4. Interaction with specific UI elements
-    #                 5. Bugs and issues
-    #                 6. Errors and issues
-
-    #     Then at the end, provide a summary of the user's behavior, emotional state, and recommendations for improvement.
-
-    #                 """
-
-    #     messages = [
-    #         HumanMessage(content=[{
-    #         "type": "media",
-    #         "mime_type": uploaded_recording.mime_type,
-    #         "file_uri": uploaded_recording.uri
-    #     },]),
-    #         HumanMessage(content=prompt)
-    #     ]
-
-    #     response = self.gemini_llm.with_structured_output(RecordingAnalysis).invoke(messages)
-
-    #     return response
 
     def gemini_recording_analyzer(
         self, recording_path: str, file_type: str
@@ -221,75 +170,58 @@ class VideoRecordingAnalyzerGraph:
 
         # Create the prompt.
         prompt = """
-You are a highly skilled UX Analyst AI. Your task is to analyze video recordings of user sessions provided as a sequence of timestamped frames or descriptions. Your goal is to meticulously observe user actions, identify any issues (bugs, usability problems, performance lags, potential enhancements), and evaluate the UI design at each step.
+You are a highly skilled UX Analyst AI. Your task is to analyze video recordings of user sessions provided as a sequence of timestamped frames or descriptions. Your goal is to meticulously observe user actions, identify any **findings** (bugs, usability problems, performance lags, potential enhancements), and evaluate the UI design at each step.
 
 **Input:**
-You will receive data representing a user session recording, likely as a series of screenshots or frames, each associated with a timestamp.
+You will receive data representing a user session recording, likely as a series of screenshots or frames, each associated with a timestamp (e.g., MM:SS).
 
 **Core Task:**
+
 1.  **Analyze Sequentially:** Process the timestamps in chronological order.
-2.  **Identify User Actions:** Determine what the user is doing at each timestamp (e.g., clicking a button, scrolling, typing text, navigating between pages, waiting).
-3.  **Observe System Responses:** Note how the system reacts (e.g., loading indicators, page changes, error messages, successful operations).
-4.  **Detect Issues:** Identify any problems the user encounters or that are apparent from the recording:
+2.  **Identify User Actions:** Determine what the user is doing at each timestamp (e.g., clicking a button, scrolling, typing text, navigating between pages, waiting, hesitating).
+3.  **Observe System Responses:** Note how the system reacts (e.g., loading indicators, page changes, error messages, successful operations, visual feedback).
+4.  **Extract Findings:** Identify any relevant **findings** from the recording:
+
     *   **Bugs:** Functionality not working as expected, errors, crashes.
-    *   **Usability Issues:** Points of confusion, unexpected behavior, inefficient workflows, difficulty finding information, unclear labels/instructions.
-    *   **Performance Issues:** Noticeable delays in loading or responsiveness. Specifically flag delays **exceeding 3 seconds** as `PERFORMANCE_ISSUE`.
-    *   **Enhancements:** Observe situations where a feature could be improved or a new feature could significantly help the user's workflow, even if no explicit issue occurred.
-5.  **Evaluate UI Design:** At each timestamp, critically assess the visual presentation (layout, spacing, alignment, contrast, typography, visual hierarchy, clarity of elements). Focus *only* on constructive feedback for improvement.
-6.  **Group into Intervals:** Group consecutive timestamps that represent a single, logical user sub-task or interaction flow (e.g., logging in, filling out a form section, attempting a search).
-7.  **Generate Structured Output:** For each logical interval identified, format your analysis precisely according to the structure below.
+    *   **Usability Issues:** Points of confusion, unexpected behavior, inefficient workflows, difficulty finding information, unclear labels/instructions, design friction.
+    *   **Performance Issues:** Noticeable delays in loading or responsiveness. Specifically flag delays **exceeding 3 seconds** as `PERFORMANCE_ISSUE`. Do not categorize normal user thinking/reading time as a performance issue.
+    *   **Enhancements:** Observe situations where a feature could be improved or a new feature could significantly help the user's workflow, even if no explicit issue occurred. Think about opportunities for simplification, efficiency gains, or better user guidance.
+5.  **Group into Intervals:** Group consecutive timestamps that represent a single, logical user sub-task or interaction flow (e.g., logging in, filling out a form section, attempting a search, completing a purchase step). Ensure intervals cover the entire session duration without gaps or overlaps in time.
+6.  **Generate Structured Output:** Format your analysis precisely according to the Pydantic models provided (`RecordingAnalysis`, `TimestampInterval`, `Finding`, `TimestampDescription`).
 
 **Output Structure:**
 
-Provide your analysis as a list of interval objects. Each interval object must contain the following fields:
+Generate a single `RecordingAnalysis` JSON object containing:
 
-- **Start Time:** The first timestamp in the group.
-- **End Time:** The last timestamp in the group.
-- **Detailed Description:** A clear description of the user's actions and observations during the interval.
-- **Issue:** If an issue is detected, provide a detailed description of the issue. If no issue is detected, leave it empty.
-- **Category:** Classify the interval as one of the following:
-  - **BUG:** Issues that significantly impact functionality and need immediate resolution.
-  - **USABILITY_ISSUE:** Problems that hinder user experience but do not completely break functionality.
-  - **PERFORMANCE_ISSUE:** Concerns related to speed, load times, or responsiveness. Only mark as performance issue if the loading time is more than 3 seconds.
-  - **ENHANCEMENT:** Suggestions for improvements or new features to enhance the user experience.
-  - **NORMAL:** Routine user actions without any apparent issues.
-  *Note: If any issue is detected, it should override the NORMAL categorization.*
-- **Short Title:** A short title for the interval.
-- **Timestamp Descriptions:** A list of timestamp descriptions for every timestamp included in the interval. Contains the following fields:
-    - **Description:** A detailed description of the user's actions and observations during the interval.
-    - **UI Design Feedback:** Observations and recommendations focused solely on the UI elements and overall visual design of the screenshot. Assess aspects such as layout, alignment, color contrast, typography, spacing, and responsiveness. Note any areas where the design could be optimized, improved, or clarified. If no visual feedback is required, leave this field empty. No need for positive feedback, only feedback on what could be improved.
-    - **Timestamp:** The timestamp in the recording. Format: MM:SS
-
-
+*   `title`: A title for the recording analysis, summarizing the main user task or overall session theme.
+*   `summary`: A concise summary of the user's overall journey, key actions, observed emotional state (if discernible), main findings (issues/opportunities), and actionable recommendations.
+*   `intervals`: A list of `TimestampInterval` objects. Each interval object must contain:
+    *   `start_time`: The first timestamp (MM:SS) in the interval.
+    *   `end_time`: The last timestamp (MM:SS) in the interval.
+    *   `short_title`: A short title summarizing the main activity or purpose of the interval.
+    *   `description`: A clear, narrative description of the user's actions and system behavior during this specific interval.
+    *   `findings`: A list of `Finding` objects identified within this interval (or null/empty list if none). Each `Finding` object includes:
+        *   `description`: A detailed description of the specific finding.
+        *   `category`: Classify the **finding** as one of: `BUG`, `USABILITY_ISSUE`, `PERFORMANCE_ISSUE`, `ENHANCEMENT`.
+    *   `timestamp_descriptions`: A list of `TimestampDescription` objects, one for each distinct timestamp/frame provided within this interval. Each includes:
+        *   `timestamp`: The specific timestamp (MM:SS).
+        *   `description`: A detailed description of user actions and screen state *at that specific timestamp*.
 
 **Category Definitions & Rules:**
 
-- **BUG:** Use when functionality is broken, an error occurs, or the system behaves in a way that prevents task completion correctly. High impact.
-
-- **USABILITY_ISSUE:** Use when the user struggles, seems confused, takes inefficient paths, or encounters friction due to the design or workflow, but the core functionality might still work (perhaps with difficulty).
-
-- **PERFORMANCE_ISSUE:** Use only when there is a clear visual indication of loading or unresponsiveness that lasts longer than 3 seconds. Do not use for normal user thinking time.
-
-- **ENHANCEMENT:** Use when you identify an opportunity to improve the existing UI/UX or suggest a new feature based on the user's interaction, even if no explicit "issue" occurred. This often relates to making tasks easier or more efficient.
-
-- **NORMAL:** Use only when the user performs routine actions smoothly without any detectable issues or clear enhancement opportunities within the interval.
-
-**Override Rule:** If any issue (BUG, USABILITY_ISSUE, PERFORMANCE_ISSUE) is detected within an interval, the category cannot be NORMAL. If an ENHANCEMENT is suggested but no specific issue is present, use ENHANCEMENT, not NORMAL. Prioritize BUG > USABILITY_ISSUE > PERFORMANCE_ISSUE > ENHANCEMENT > NORMAL.
-
+*   **BUG:** Use when functionality is broken, an error occurs (system error, validation error preventing progress inappropriately), or the system behaves in a way that prevents task completion correctly. High impact, requires fixing.
+*   **USABILITY_ISSUE:** Use when the user struggles, seems confused, hesitates, takes inefficient paths, expresses frustration (if discernible), or encounters friction due to the design or workflow. The core functionality might still work, but the experience is suboptimal.
+*   **PERFORMANCE_ISSUE:** Use *only* when there is a clear visual indication of loading, processing, or unresponsiveness that lasts noticeably longer than 3 seconds. Requires visual evidence (e.g., spinner, frozen screen). Do *not* use for normal user thinking/reading time between interactions.
+*   **ENHANCEMENT:** Use when you identify an opportunity to improve the existing UI/UX or suggest a new feature based on the user's interaction or workflow, even if no explicit "issue" occurred. This focuses on making tasks easier, faster, clearer, or more delightful.
 
 **Important Considerations:**
 
-- Focus on Observation: Base your analysis strictly on what is visible in the recording. Infer user intent cautiously based on their actions.
+*   **Focus on Observation:** Base your analysis strictly on what is visible/audible in the recording. Infer user intent and emotion cautiously based *only* on their actions and behaviors (e.g., repeated clicks, backtracking, long pauses before action).
+*   **Be Specific & Actionable:** Descriptions for intervals, findings, and timestamps should be clear, detailed, and provide enough context to be understood and potentially acted upon. Avoid vague language.
+*   **Interval Logic:** Group timestamps logically based on the user attempting and completing (or abandoning) a coherent sub-task. Intervals should flow chronologically and cover the entire session.
+*   **Timestamp Granularity:** Ensure every timestamp provided in the input is accounted for within exactly one `TimestampDescription` inside its corresponding `TimestampInterval`.
 
-- Be Specific: Descriptions and issue details should be clear and actionable. Avoid vague language.
-
-- UI Feedback Focus: Remember, UI Design Feedback is only about visual design elements and layout improvements. Functional issues go into the main Issue field. Do not provide positive UI feedback, only constructive criticism.
-
-- Interval Logic: Group timestamps logically based on the user completing a small, coherent part of their overall task. Intervals can vary in duration.
-
-- Timestamp Granularity: Ensure each entry in Timestamp Descriptions corresponds to a distinct moment/frame provided in the input.
-
-Now, please analyze the provided user session recording data and generate the structured output as defined above.
+Now, please analyze the provided user session recording data and generate the structured JSON output conforming to the `RecordingAnalysis` model.
 
                     """
 

@@ -38,3 +38,10 @@ def get_recording_duration(recording_path: str) -> float:
         return float(duration)
     finally:
         cap.release()  # Always release the capture object
+
+def get_file_size(file_path: str) -> int:
+    """
+    Get the size of a file in bytes.
+    """
+    return os.path.getsize(file_path)
+
