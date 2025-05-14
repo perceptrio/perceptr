@@ -34,6 +34,7 @@ class Settings(BaseSettings):
 
     # AI analysis settings
     AI_ANALYSIS_ENABLED: bool = False
+    STALE_SESSION_DURATION: int = 3600  # 1 hour
 
     class Config:
         env_file = ".env"

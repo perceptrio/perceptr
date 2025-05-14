@@ -68,6 +68,12 @@ class RecordingRepository:
         self.db.refresh(recording)
         return recording
 
+    def upsert(self, recording: Recording) -> Recording:
+        self.db.add(recording)
+        self.db.commit()
+        self.db.refresh(recording)
+        return recording
+
     def soft_delete(self, recording: Recording) -> Recording:
         recording.deleted_at = datetime.now()
         self.db.commit()
