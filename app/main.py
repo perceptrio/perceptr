@@ -5,9 +5,10 @@ from api.v1.org.router import router as org_router
 from api.v1.per.router import router as per_router
 from api.v1.recording.router import router as recording_router
 from api.v1.recording_intervals.router import router as recording_interval_router
+from common.middleware.app_start import lifespan
 from common.middleware.request_logger import RequestLoggerMiddleware
 from common.middleware.unhandled_exception import unhandled_exceptions_handler
-from common.services.sqs_listener import get_sqs_listener, lifespan
+from common.services.sqs_listener import get_sqs_listener
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
