@@ -1,9 +1,10 @@
 FROM python:3.12.10
 
-# Install Node.js and npm
+# Install Node.js, npm, FFmpeg and other dependencies
 RUN apt-get update && apt-get install -y \
     nodejs \
     npm \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Install specific rrvideo version globally
