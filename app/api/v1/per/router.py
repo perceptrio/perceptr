@@ -51,13 +51,8 @@ async def process_session_api(
     org = org_service.get_org_by_project_id(db, project_id)
     if org is None:
         raise HTTPException(status_code=400, detail="Invalid project id")
-    recording = service.get_or_create_recording_from_session(
-        db, org.id, session_id, force
-    )
-    if recording is None:
-        raise HTTPException(status_code=400, detail="Failed to get or create recording")
     try:
-        service.process_session(db, org.id, recording, background_tasks)
+        service.process_session(db, org.id, session_id, background_tasks, force)
         return GenericResponse(success=True, message="Session triggered successfully")
     except Exception as e:
         logger.error(f"Failed to process session", exc_info=e)
@@ -71,6 +66,7 @@ async def process_session_api(
 async def get_batch_upload_url(
     project_id: str,
     session_id: str,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> BatchUrlResponse:
     """Generate a presigned URL for batch upload with automatic batch numbering"""
@@ -78,8 +74,15 @@ async def get_batch_upload_url(
     org = org_service.get_org_by_project_id(db, project_id)
     if org is None:
         raise HTTPException(status_code=400, detail="Invalid project id")
-    recording = recording_service.get_recording_by_session_id(session_id, org.id, db)
-    if recording and recording.analysis_status != AnalysisStatus.PENDING.value:
+
+    # Upsert recording (create if not exist, else update updated_at)
+    recording = service.upsert_session_for_batch(db, org.id, session_id)
+
+    if recording is None:
+        raise HTTPException(status_code=400, detail="Failed to get session")
+
+    # If not in PENDING, keep logic as is
+    if recording.analysis_status != AnalysisStatus.PENDING.value:
         raise HTTPException(status_code=400, detail="processing already started")
     try:
         # List existing batches for this session
@@ -106,6 +109,14 @@ async def get_batch_upload_url(
             expiration=3600,  # 1 hour expiration
         )
 
+        # Schedule delayed check for stale recordings
+        background_tasks.add_task(
+            service.check_and_process_stale_recording,
+            db,
+            org.id,
+            session_id,
+            background_tasks,
+        )
         return BatchUrlResponse(
             success=True, url=upload_url, batch_number=next_batch, file_path=file_path
         )

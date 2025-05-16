@@ -1,5 +1,7 @@
 import gzip
 import io
+import time
+from datetime import UTC, datetime, timedelta
 
 from api.v1.recording import service as recording_service
 from api.v1.recording.schema import RecordingCreate
@@ -68,10 +70,25 @@ def get_or_create_recording_from_session(
 def _process_session_background(
     db: Session,
     org_id: int,
-    recording: Recording,
+    session_id: str,
+    force: bool = False,
 ) -> None:
     """Background task to process a session"""
-    session_id = recording.session_id
+    recording = recording_service.get_recording_by_session_id(session_id, org_id, db)
+    if not recording:
+        logger.error(
+            "Recording not found while processing session",
+            session_id=session_id,
+            org_id=org_id,
+        )
+        return
+    if recording.analysis_status != AnalysisStatus.PENDING.value and not force:
+        logger.info(
+            "Skipping analysis for non-pending session",
+            session_id=session_id,
+            org_id=org_id,
+        )
+        return
     try:
         logger.info(
             "Processing session started",
@@ -173,16 +190,14 @@ def _process_session_background(
 def process_session(
     db: Session,
     org_id: int,
-    recording: Recording,
+    session_id: str,
     background_tasks: BackgroundTasks,
+    force: bool = False,
 ) -> dict:
     """Process a session"""
     try:
         background_tasks.add_task(
-            _process_session_background,
-            db,
-            org_id,
-            recording,
+            _process_session_background, db, org_id, session_id, force
         )
 
         return {"success": True, "message": "Session scheduled for processing"}
@@ -190,7 +205,43 @@ def process_session(
         logger.error(
             "Error processing session",
             exc_info=e,
-            session_id=recording.session_id,
+            session_id=session_id,
             org_id=org_id,
         )
         raise
+
+
+def upsert_session_for_batch(db: Session, org_id: int, session_id: str) -> Recording:
+    """Upsert a recording for batch upload: create if not exist, else update updated_at only."""
+
+    recording = recording_service.get_recording_by_session_id(session_id, org_id, db)
+    if recording:
+        recording.updated_at = datetime.now(UTC)
+        recording_service.update_recording(db, recording)
+        return recording
+    else:
+        recording_create = RecordingCreate(
+            org_id=org_id,
+            session_id=session_id,
+            file_name=f"{session_id}/{SDK_FILE_EXTENSION}",
+            file_type=VideoType.WEBM.value,
+            file_size=0,
+            analysis_status=AnalysisStatus.PENDING.value,
+        )
+        return recording_service.create_recording(db, recording_create)
+
+
+def check_and_process_stale_recording(db: Session, org_id: int, session_id: str):
+    """Background task that waits 1 hour, then checks if the recording is still not processed and updated_at > 1 hour ago, and if so, triggers processing."""
+    time.sleep(settings.STALE_SESSION_DURATION)
+    recording = recording_service.get_recording_by_session_id(session_id, org_id, db)
+    if not recording:
+        # TODO: maybe add a cleaner to delete stale batches in s3?
+        return
+    # Use UTC for comparison
+    now = datetime.now(UTC)
+    if recording.analysis_status == AnalysisStatus.PENDING.value and (
+        now - recording.updated_at
+    ) > timedelta(seconds=settings.STALE_SESSION_DURATION):
+        # Trigger processing
+        _process_session_background(db, org_id, session_id, False)

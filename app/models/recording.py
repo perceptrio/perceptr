@@ -1,8 +1,9 @@
-from pydantic import BaseModel
-from sqlalchemy import JSON, Column, Integer, String, DateTime, ForeignKey, Text, Float
-from datetime import datetime, UTC
+from datetime import UTC, datetime
+
+from common.enums import AnalysisStatus
+from sqlalchemy import JSON, Column, DateTime, Float, ForeignKey, Integer, String, Text
+
 from .base import Base
-from common.enums import AnalysisStatus, VideoType
 
 
 class Recording(Base):

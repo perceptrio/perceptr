@@ -230,6 +230,12 @@ def get_recordings(
     return recordings
 
 
+def get_stale_sessions(db: Session) -> List[Recording]:
+    repository = RecordingRepository(db)
+    recordings = repository.get_stale_sessions()
+    return recordings
+
+
 def soft_delete_recording(db: Session, recording_id: int, org_id: int) -> None:
     repository = RecordingRepository(db)
     recording = repository.get_by_id(recording_id, org_id)

@@ -1,48 +1,14 @@
 import asyncio
 import json
 from concurrent.futures import Future, ThreadPoolExecutor
-from contextlib import asynccontextmanager
 from functools import lru_cache
-from typing import Any, AsyncGenerator, Dict, Optional
+from typing import Any, Dict, Optional
 
 import boto3
 from botocore.exceptions import ClientError
 from common.services.logger import logger
 from core.constants import SQSQueueConfig
-from fastapi import FastAPI
 from settings import settings
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    # Startup
-    try:
-        sqs_listener = get_sqs_listener()
-        # await sqs_listener.start()
-        # logger.info("SQS listener service started successfully")
-    except Exception as e:
-        logger.error(
-            "Failed to start SQS listener service",
-            exc_info=e,
-            service="sqs_listener",
-            action="startup",
-        )
-
-    try:
-        yield
-    finally:
-        # Ensure cleanup happens in finally block
-        try:
-            sqs_listener = get_sqs_listener()
-            # await sqs_listener.stop()
-            # logger.info("SQS listener service stopped successfully")
-        except Exception as e:
-            logger.error(
-                "Error while stopping SQS listener service",
-                exc_info=e,
-                service="sqs_listener",
-                action="shutdown",
-            )
 
 
 class SQSListener:

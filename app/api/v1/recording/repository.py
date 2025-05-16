@@ -1,7 +1,9 @@
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import List, Optional
 
+from common.enums import AnalysisStatus
 from models.recording import Recording
+from settings import settings
 from sqlalchemy.orm import Session
 
 
@@ -20,6 +22,18 @@ class RecordingRepository:
             self.db.query(Recording)
             .filter(Recording.id == recording_id, Recording.org_id == org_id)
             .first()
+        )
+
+    def get_stale_sessions(self) -> List[Recording]:
+        return (
+            self.db.query(Recording)
+            .filter(
+                Recording.updated_at
+                < datetime.now(UTC)
+                - timedelta(seconds=settings.STALE_SESSION_DURATION),
+                Recording.analysis_status == AnalysisStatus.PENDING.value,
+            )
+            .all()
         )
 
     def get_all(
@@ -64,6 +78,12 @@ class RecordingRepository:
         )
 
     def update(self, recording: Recording) -> Recording:
+        self.db.commit()
+        self.db.refresh(recording)
+        return recording
+
+    def upsert(self, recording: Recording) -> Recording:
+        self.db.add(recording)
         self.db.commit()
         self.db.refresh(recording)
         return recording
