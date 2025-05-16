@@ -233,6 +233,12 @@ def get_recordings(
     return recordings
 
 
+def get_stale_sessions(db: Session) -> List[Recording]:
+    repository = RecordingRepository(db)
+    recordings = repository.get_stale_sessions()
+    return recordings
+
+
 def soft_delete_recording(db: Session, recording_id: int, org_id: int) -> None:
     repository = RecordingRepository(db)
     recording = repository.get_by_id(recording_id, org_id)
@@ -246,7 +252,7 @@ def hard_delete_recording(db: Session, recording_id: int, org_id: int) -> None:
     recording = repository.get_by_id(recording_id, org_id)
     if not recording:
         raise HTTPException(status_code=404, detail="Recording not found")
-    s3_service.delete_folder(f"{org_id}/recordings/{recording.file_name.split('/')[0]}")
+    s3_service.delete_folder(f"{org_id}/{recording.file_name.split('/')[0]}")
     repository.delete(recording)
 
 
@@ -407,19 +413,27 @@ def analyze_recording(
             repository.update(recording)
         return None
 
-def process_intervals_findings(analyzed_intervals: List[RecordingInterval], timestamp_intervals) -> List:
+
+def process_intervals_findings(
+    analyzed_intervals: List[RecordingInterval], timestamp_intervals
+) -> List:
     all_findings = []
-    for analyzed_interval, timestamp_interval in zip(analyzed_intervals, timestamp_intervals):
+    for analyzed_interval, timestamp_interval in zip(
+        analyzed_intervals, timestamp_intervals
+    ):
         if analyzed_interval.category == "NORMAL":
             continue
         for finding in timestamp_interval.findings:
-            all_findings.append({
-                "recording_interval_id": analyzed_interval.id,
-                "description": finding.description,
-                "category": finding.category,
-            })
+            all_findings.append(
+                {
+                    "recording_interval_id": analyzed_interval.id,
+                    "description": finding.description,
+                    "category": finding.category,
+                }
+            )
 
     return all_findings
+
 
 @post_analysis_process()
 def analyze_local_recording_video(
