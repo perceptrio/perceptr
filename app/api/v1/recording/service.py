@@ -31,6 +31,7 @@ from .schema import (
     RecordingDownloadUrl,
     RecordingUploadUrl,
 )
+from settings import settings
 
 # Type variables for the decorator
 F = TypeVar("F", bound=Callable[..., Any])
@@ -387,8 +388,10 @@ def analyze_recording(
                 f"{org_id}/{recording.file_name}"
             )
 
+            slowdown_factor = settings.SLOW_DOWN_FACTOR
+
             analyze_local_recording_video(
-                db, org_id, recording_id, recording, local_recording_path, slowdown_factor=2.0
+                db, org_id, recording_id, recording, local_recording_path, slowdown_factor=slowdown_factor
             )
 
         logger.info(
@@ -445,7 +448,7 @@ def analyze_local_recording_video(
     slowdown_factor: float = 1.0,
 ) -> None:
     """
-    Analyzes a local video recording using VideoRecordingAnalyzerGraph, breaking it into 30-second chunks.
+    Analyzes a local video recording using VideoRecordingAnalyzerGraph, breaking it into chunks.
     
     Args:
         db: Database session
@@ -545,7 +548,7 @@ def analyze_local_recording_video(
         all_intervals = []
         
         # Define chunk size in seconds for the slowed video
-        slowed_chunk_size_seconds = 30
+        slowed_chunk_size_seconds = settings.RECORDING_INTERVAL_DURATION
         
         # Split the slowed video into chunks
         logger.info(f"Splitting video into {slowed_chunk_size_seconds}-second chunks")

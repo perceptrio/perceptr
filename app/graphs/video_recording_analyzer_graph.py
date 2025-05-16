@@ -132,7 +132,7 @@ class VideoRecordingAnalyzerGraph:
                     file_uri=uploaded_file.uri,
                     file_name=uploaded_file.name,
                 )
-                time.sleep(10)  # Adjust sleep time as needed
+                time.sleep(5)  # Adjust sleep time as needed
                 # Fetch the latest file state
                 uploaded_file = self.gemini_client.files.get(name=uploaded_file.name)
 
