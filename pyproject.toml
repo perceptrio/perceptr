@@ -33,7 +33,10 @@ dependencies = [
     "boto3 (>=1.36.1,<2.0.0)",
     "google-genai (>=1.11.0,<2.0.0)",
     "httpx (>=0.28.1,<0.29.0)",
-    "python-json-logger (>=3.3.0,<4.0.0)"
+    "python-json-logger (>=3.3.0,<4.0.0)",
+    "langchain-qdrant (>=0.2.0,<0.3.0)",
+    "qdrant-client (>=1.14.2,<2.0.0)",
+    "fastembed (>=0.7.0,<0.8.0)"
 ]
 
 

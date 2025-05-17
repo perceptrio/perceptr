@@ -38,6 +38,12 @@ class Settings(BaseSettings):
     RECORDING_INTERVAL_DURATION: int = 30  # 30 seconds chunk size
     SLOW_DOWN_FACTOR: float = 1.0  # 1.0 means no slowdown set it to 2.0 for 2x slowdown
 
+    QDRANT_API_KEY: str
+    QDRANT_URL: str
+    QDRANT_COLLECTION_NAME: str
+
+    COHERE_API_KEY: str
+
     class Config:
         env_file = ".env"
 

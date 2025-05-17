@@ -19,6 +19,7 @@ from .schema import (
     RecordingResponse,
     RecordingUploadUrl,
     RecordingUploadUrlResponse,
+    SearchBody,
 )
 
 router = APIRouter(prefix=f"{APIPath.V1}/recordings", tags=["recordings"])
@@ -60,6 +61,28 @@ def create_recording(
     recording = service.create_recording_for_upload(db, payload.org.id, recording)
     return recording
 
+@router.get("/embed-recordings")
+def embed_recordings(
+    payload: Annotated[TokenPayload, Depends(GetPayload(type="access"))],
+    db: Session = Depends(get_db),
+):
+    try:
+        service.add_all_recordings_to_qdrant(db, payload.org.id)
+        return {"message": "Recordings embedded"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@router.post("/search")
+def search_recordings(
+    body: SearchBody,
+    payload: Annotated[TokenPayload, Depends(GetPayload(type="access"))],
+    db: Session = Depends(get_db),
+):
+    try:
+        results = service.search_knowledge_base(db, payload.org.id, body.query)
+        return results
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/{recording_id}", response_model=RecordingResponse)
 def get_recording(
@@ -134,3 +157,4 @@ def analyze_recording(
         return {"message": f"Analysis started for recording {recording_id}"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
