@@ -240,8 +240,14 @@ def check_and_process_stale_recording(db: Session, org_id: int, session_id: str)
         return
     # Use UTC for comparison
     now = datetime.now(UTC)
+
+    # Ensure recording.updated_at is offset-aware (assuming naive from DB is UTC)
+    updated_at_value = recording.updated_at
+    if updated_at_value and updated_at_value.tzinfo is None:
+        updated_at_value = updated_at_value.replace(tzinfo=UTC)
+
     if recording.analysis_status == AnalysisStatus.PENDING.value and (
-        now - recording.updated_at
+        now - updated_at_value
     ) > timedelta(seconds=settings.STALE_SESSION_DURATION):
         # Trigger processing
         _process_session_background(db, org_id, session_id, False)

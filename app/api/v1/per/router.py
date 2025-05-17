@@ -115,7 +115,6 @@ async def get_batch_upload_url(
             db,
             org.id,
             session_id,
-            background_tasks,
         )
         return BatchUrlResponse(
             success=True, url=upload_url, batch_number=next_batch, file_path=file_path

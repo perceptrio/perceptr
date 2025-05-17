@@ -1,6 +1,8 @@
 import uuid
 from datetime import datetime, time
 from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar, cast
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from api.v1.issue.repository import IssueRepository
 from api.v1.issue_recording.repository import IssueRecordingRepository
@@ -14,12 +16,13 @@ from core.constants import SDK_FILE_EXTENSION
 from fastapi import HTTPException, status
 from graphs.issues_summarizer_graph import IssuesSummarizerGraph
 from graphs.video_recording_analyzer_graph import VideoRecordingAnalyzerGraph
+from graphs.recording_summarizer_graph import RecordingSummarizerGraph
 from models.issue import Issue
 from models.issue_recording import IssueRecording
 from models.recording import Recording
 from models.recording_interval import RecordingInterval
 from sqlalchemy.orm import Session
-from utils.recording import get_file_size, get_recording_duration
+from utils.recording import get_file_size, get_recording_duration, chunk_video, slow_down_video
 
 from .repository import RecordingRepository
 from .schema import (
@@ -28,6 +31,7 @@ from .schema import (
     RecordingDownloadUrl,
     RecordingUploadUrl,
 )
+from settings import settings
 
 # Type variables for the decorator
 F = TypeVar("F", bound=Callable[..., Any])
@@ -384,8 +388,10 @@ def analyze_recording(
                 f"{org_id}/{recording.file_name}"
             )
 
+            slowdown_factor = settings.SLOW_DOWN_FACTOR
+
             analyze_local_recording_video(
-                db, org_id, recording_id, recording, local_recording_path
+                db, org_id, recording_id, recording, local_recording_path, slowdown_factor=slowdown_factor
             )
 
         logger.info(
@@ -439,8 +445,19 @@ def analyze_local_recording_video(
     recording_id: int,
     recording: Recording,
     local_recording_path: str,
+    slowdown_factor: float = 1.0,
 ) -> None:
-    """Analyzes a local video recording using VideoRecordingAnalyzerGraph."""
+    """
+    Analyzes a local video recording using VideoRecordingAnalyzerGraph, breaking it into chunks.
+    
+    Args:
+        db: Database session
+        org_id: Organization ID
+        recording_id: Recording ID
+        recording: Recording model
+        local_recording_path: Path to the local recording file
+        slowdown_factor: Factor by which to slow down the video for analysis (e.g., 2.0 for half speed)
+    """
     try:
         repository = RecordingRepository(db)
         issue_repository = IssueRepository(db)
@@ -451,159 +468,315 @@ def analyze_local_recording_video(
             logger.error(f"Recording {recording_id} not found during analysis.")
             raise ValueError(f"Recording {recording_id} not found")
 
-        # Set initial progress if desired
-        # recording.analysis_progress = 10 # Example: Set to 10% before starting graph analysis
-        # repository.update(recording)
-
-        logger.info(
-            f"Starting video analysis for recording {recording_id} using VideoRecordingAnalyzerGraph."
-        )
-        video_graph = VideoRecordingAnalyzerGraph()
-        analysis_response = video_graph.analyze_recording(
-            org_id=str(org_id),  # Ensure org_id is string if required by graph
-            recording_id=str(recording_id),  # Ensure recording_id is string if required
-            recording_path=local_recording_path,
-            file_type=recording.file_type,
-        )
-
-        recording_analysis = analysis_response.get("recording_analysis")
-        if not recording_analysis:
-            raise ValueError(
-                "Video analysis graph did not return the expected 'recording_analysis' structure."
-            )
-
-        # Extract analyzed intervals and summary from the graph response
-        analyzed_intervals: List[RecordingInterval] = []
-        # The graph returns Pydantic models, convert them to SQLAlchemy models if necessary
-        # Assuming the structure matches:
-        for interval_data in recording_analysis.intervals:
-            # Convert TimestampDescription Pydantic models to JSON for storage,
-            # formatting the timestamp within each description from MM:SS to HH:MM:SS
-            processed_timestamp_descriptions_json = []
-            for ts_desc in interval_data.timestamp_descriptions:
-                try:
-                    # Parse MM:SS string to time object
-                    time_obj = datetime.strptime(ts_desc.timestamp, "%M:%S").time()
-                    # Format time object to HH:MM:SS string
-                    hhmmss_str = time_obj.strftime("%H:%M:%S")
-                    # Dump original object and update the timestamp
-                    ts_dict = ts_desc.model_dump()
-                    ts_dict["timestamp"] = hhmmss_str
-                    processed_timestamp_descriptions_json.append(ts_dict)
-                except ValueError:
-                    # Handle cases where the timestamp might not be in MM:SS format
-                    logger.warning(
-                        f"Could not parse timestamp '{ts_desc.timestamp}' for recording {recording_id}. Storing original."
-                    )
-                    processed_timestamp_descriptions_json.append(
-                        ts_desc.model_dump()
-                    )  # Store original if parsing fails
-
-            # Convert MM:SS string from graph for start/end times to datetime.time object
-            try:
-                start_time_obj = datetime.strptime(
-                    interval_data.start_time, "%M:%S"
-                ).time()
-            except ValueError:
-                logger.warning(
-                    f"Could not parse start_time '{interval_data.start_time}' for recording {recording_id}. Defaulting to 00:00:00."
-                )
-                start_time_obj = time(0, 0, 0)
-            try:
-                end_time_obj = datetime.strptime(interval_data.end_time, "%M:%S").time()
-            except ValueError:
-                logger.warning(
-                    f"Could not parse end_time '{interval_data.end_time}' for recording {recording_id}. Defaulting to 00:00:00."
-                )
-                end_time_obj = time(0, 0, 0)
-
-            findings = interval_data.findings
-            if findings and len(findings) > 0:
-                category = "BUG"
-                issue = ""
-            else:
-                category = "NORMAL"
-                issue = None
-
-            analyzed_intervals.append(
-                RecordingInterval(
-                    recording_id=recording_id,
-                    start_time=start_time_obj,  # Use converted time object
-                    end_time=end_time_obj,  # Use converted time object
-                    category=category,
-                    issue=issue,
-                    short_title=interval_data.short_title,
-                    timestamp_descriptions=processed_timestamp_descriptions_json,  # Use processed JSON list
-                    description=interval_data.description,
-                )
-            )
-
-        recording_summary = recording_analysis.summary
-        # Assuming the graph summary is sufficient and we don't need a separate summarizer graph call
-        # If a specific title format is needed, derive it or adjust the graph prompt
-
-        logger.info(f"Video Analysis Summary: {recording_summary}")
-        logger.info(f"Video Analysis Short Title: {recording_analysis.title}")
-
-        # Persist intervals
-        has_intervals = (
-            recording_intervals_service.check_recording_intervals_with_recording_id(
-                db, recording_id
-            )
-        )
-        if has_intervals:
-            logger.info(f"Replacing existing intervals for recording {recording_id}")
-            recording_intervals_service.replace_recording_intervals(
-                db, recording_id, analyzed_intervals
-            )
-        else:
-            logger.info(f"Creating new intervals for recording {recording_id}")
-            # Need to get IDs back if process_issues relies on interval IDs
-            created_intervals = (
-                recording_intervals_service.batch_create_recording_intervals(
-                    db, analyzed_intervals
-                )
-            )
-            # Assign created IDs back to analyzed_intervals if needed for process_issues
-            # This depends on how batch_create returns IDs and if process_issues needs them.
-            # For simplicity, assuming process_issues can work without explicit interval IDs for now.
-            # If IDs are needed, adjust batch_create and the following process_issues call.
-
-        # Process issues based on analyzed intervals
-        if recording_has_issues(analyzed_intervals):
-            logger.info(f"Processing issues for recording {recording_id}")
-            # Ensure analyzed_intervals have IDs if process_issues requires them
-            all_findings = process_intervals_findings(
-                analyzed_intervals, recording_analysis.intervals
-            )
-            process_issues(db, org_id, recording_id, all_findings)
-            issues = issue_repository.get_issues_by_recording(org_id, recording_id)
-            categories = [issue.category for issue in issues]
-            recording.tags = process_tags(categories)
-            logger.info(f"Issues processed for recording {recording_id}")
-        else:
-            logger.info(f"No issues found for recording {recording_id}")
-
-        # Update final recording state
-        recording.summary = recording_summary
-        recording.short_title = recording_analysis.title
-        recording.set_analysis_status(AnalysisStatus.COMPLETED)
-        recording.analysis_error = None
-        recording.analysis_progress = 100
-        # Potentially update file_duration if not already set and if determinable
-        if recording.file_duration is None:
-            try:
-                recording.file_duration = get_recording_duration(local_recording_path)
-            except Exception as dur_err:
-                logger.warning(
-                    f"Could not determine duration for {local_recording_path}: {dur_err}"
-                )
-
-        recording.file_size = get_file_size(local_recording_path)
+        # Set initial progress
+        recording.set_analysis_status(AnalysisStatus.IN_PROGRESS)
+        recording.analysis_progress = 5
         repository.update(recording)
 
-        logger.info(f"Video analysis completed for recording {recording_id}")
-        return None
+        logger.info(f"Starting video analysis for recording {recording_id} using VideoRecordingAnalyzerGraph.")
+        
+        # Check if FFmpeg is available
+        try:
+            from utils.recording import is_ffmpeg_available
+            use_ffmpeg = is_ffmpeg_available()
+            if use_ffmpeg:
+                logger.info("FFmpeg detected - will use FFmpeg for video processing tasks")
+            else:
+                logger.warning("FFmpeg not found - will use OpenCV for video processing (slower)")
+        except Exception:
+            use_ffmpeg = False
+            logger.warning("Error checking for FFmpeg - will use OpenCV for video processing")
+        
+        # Get total video duration of original video
+        try:
+            if use_ffmpeg:
+                # Try FFmpeg first
+                from utils.recording import ffmpeg_get_video_duration
+                original_duration = ffmpeg_get_video_duration(local_recording_path)
+                logger.info(f"Original video duration (FFmpeg): {original_duration} seconds for recording {recording_id}")
+            else:
+                # Use OpenCV
+                original_duration = get_recording_duration(local_recording_path)
+                logger.info(f"Original video duration (OpenCV): {original_duration} seconds for recording {recording_id}")
+        except Exception as e:
+            # Fall back to OpenCV
+            logger.warning(f"Error getting duration with FFmpeg: {str(e)}")
+            original_duration = get_recording_duration(local_recording_path)
+            logger.info(f"Original video duration (OpenCV fallback): {original_duration} seconds for recording {recording_id}")
+        
+        # Create a slowed-down version of the video if requested
+        slowed_video_path = local_recording_path
+        if slowdown_factor > 1.0:
+            logger.info(f"Slowing down entire video by factor of {slowdown_factor}x for analysis")
+            
+            # Create path for slowed video
+            base_dir = os.path.dirname(local_recording_path)
+            base_filename = os.path.basename(local_recording_path)
+            name, ext = os.path.splitext(base_filename)
+            slowed_video_path = os.path.join(base_dir, f"{name}_slowed{ext}")
+            
+            try:
+                if use_ffmpeg:
+                    # Try FFmpeg first for slowing down
+                    from utils.recording import ffmpeg_slow_down_video
+                    start_time = datetime.now()
+                    ffmpeg_slow_down_video(local_recording_path, slowed_video_path, slowdown_factor)
+                    elapsed = (datetime.now() - start_time).total_seconds()
+                    logger.info(f"Created slowed version of video using FFmpeg at {slowed_video_path} in {elapsed:.1f}s")
+                else:
+                    raise RuntimeError("Using OpenCV for slowing down")
+            except Exception as e:
+                # Fall back to OpenCV
+                logger.warning(f"FFmpeg slowing failed: {str(e)}. Falling back to OpenCV.")
+                start_time = datetime.now()
+                slow_down_video(local_recording_path, slowed_video_path, slowdown_factor)
+                elapsed = (datetime.now() - start_time).total_seconds()
+                logger.info(f"Created slowed version of video using OpenCV at {slowed_video_path} in {elapsed:.1f}s")
+            
+            # Calculate the slowed duration for information
+            try:
+                if use_ffmpeg:
+                    from utils.recording import ffmpeg_get_video_duration
+                    slowed_duration = ffmpeg_get_video_duration(slowed_video_path)
+                else:
+                    slowed_duration = get_recording_duration(slowed_video_path)
+            except:
+                slowed_duration = get_recording_duration(slowed_video_path)
+            logger.info(f"Slowed video duration: {slowed_duration} seconds (original: {original_duration} seconds)")
+        
+        # Initialize result containers
+        all_intervals = []
+        
+        # Define chunk size in seconds for the slowed video
+        slowed_chunk_size_seconds = settings.RECORDING_INTERVAL_DURATION
+        
+        # Split the slowed video into chunks
+        logger.info(f"Splitting video into {slowed_chunk_size_seconds}-second chunks")
+        try:
+            if use_ffmpeg:
+                # Try FFmpeg first for chunking
+                from utils.recording import ffmpeg_chunk_video
+                start_time = datetime.now()
+                chunk_info = ffmpeg_chunk_video(slowed_video_path, slowed_chunk_size_seconds)
+                elapsed = (datetime.now() - start_time).total_seconds()
+                logger.info(f"Successfully split video into {len(chunk_info)} chunks using FFmpeg in {elapsed:.1f}s")
+            else:
+                raise RuntimeError("Using OpenCV for chunking")
+        except Exception as e:
+            # Fall back to OpenCV
+            logger.warning(f"FFmpeg chunking failed: {str(e)}. Falling back to OpenCV.")
+            start_time = datetime.now()
+            chunk_info = chunk_video(slowed_video_path, slowed_chunk_size_seconds)
+            elapsed = (datetime.now() - start_time).total_seconds()
+            logger.info(f"Successfully split video into {len(chunk_info)} chunks using OpenCV in {elapsed:.1f}s")
+        
+        chunk_count = len(chunk_info)
+        
+        video_graph = VideoRecordingAnalyzerGraph()
+        
+        try:
+            # Initialize result containers for parallel processing
+            max_workers = 5  # Maximum number of parallel tasks
+            completed = 0
+            
+            logger.info(f"Starting parallel analysis of {chunk_count} chunks with max {max_workers} workers")
+            
+            # Process chunks in parallel with a maximum of 5 concurrent tasks
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # Submit all chunks for processing
+                future_to_chunk = {}
+                for i, (chunk_path, start_seconds, duration) in enumerate(chunk_info):
+                    future = executor.submit(
+                        analyze_video_chunk,
+                        str(org_id),
+                        str(recording_id),
+                        chunk_path,
+                        start_seconds,
+                        recording.file_type,
+                        video_graph,
+                        slowdown_factor
+                    )
+                    future_to_chunk[future] = (i, chunk_path, start_seconds, duration)
+                
+                # Process results as they complete
+                for future in as_completed(future_to_chunk):
+                    i, chunk_path, start_seconds, duration = future_to_chunk[future]
+                    completed += 1
+                    
+                    # Update progress
+                    progress_pct = int(5 + (completed / chunk_count) * 70)  # 5-75% for chunking and analysis
+                    recording.analysis_progress = progress_pct
+                    repository.update(recording)
+                    
+                    try:
+                        intervals, _, _ = future.result()
+                        all_intervals.extend(intervals)
+                        logger.info(f"Completed chunk {i+1}/{chunk_count} ({completed}/{chunk_count} done)")
+                    except Exception as exc:
+                        logger.error(f"Chunk {i+1} at {start_seconds}s generated an exception: {exc}")
+                    
+                    # Clean up chunk file
+                    try:
+                        os.remove(chunk_path)
+                        logger.info(f"Removed chunk file after analysis: {chunk_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to remove chunk file {chunk_path}: {e}")
+            
+            # Clean up slowed video if it was created
+            if slowed_video_path != local_recording_path:
+                try:
+                    os.remove(slowed_video_path)
+                    logger.info(f"Removed slowed video file: {slowed_video_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to remove slowed video file {slowed_video_path}: {e}")
+                    
+            # Sort intervals by start time
+            all_intervals.sort(key=lambda x: x.start_time)
+            
+            # Process the intervals
+            logger.info(f"Processing analysis with {len(all_intervals)} intervals")
+            
+            # Convert the analysis to SQLAlchemy models
+            analyzed_intervals: List[RecordingInterval] = []
+            
+            for interval_data in all_intervals:
+                # Convert TimestampDescription models to JSON
+                processed_timestamp_descriptions_json = []
+                for ts_desc in interval_data.timestamp_descriptions:
+                    try:
+                        # Parse MM:SS string to time object
+                        time_obj = datetime.strptime(ts_desc.timestamp, "%M:%S").time()
+                        # Format time object to HH:MM:SS string
+                        hhmmss_str = time_obj.strftime("%H:%M:%S")
+                        # Dump original object and update the timestamp
+                        ts_dict = ts_desc.model_dump()
+                        ts_dict["timestamp"] = hhmmss_str
+                        processed_timestamp_descriptions_json.append(ts_dict)
+                    except ValueError:
+                        logger.warning(
+                            f"Could not parse timestamp '{ts_desc.timestamp}' for recording {recording_id}. Storing original."
+                        )
+                        processed_timestamp_descriptions_json.append(ts_desc.model_dump())
+
+                # Convert MM:SS string to datetime.time object
+                try:
+                    start_time_obj = datetime.strptime(interval_data.start_time, "%M:%S").time()
+                except ValueError:
+                    logger.warning(
+                        f"Could not parse start_time '{interval_data.start_time}' for recording {recording_id}. Defaulting to 00:00:00."
+                    )
+                    start_time_obj = time(0, 0, 0)
+                try:
+                    end_time_obj = datetime.strptime(interval_data.end_time, "%M:%S").time()
+                except ValueError:
+                    logger.warning(
+                        f"Could not parse end_time '{interval_data.end_time}' for recording {recording_id}. Defaulting to 00:00:00."
+                    )
+                    end_time_obj = time(0, 0, 0)
+
+                findings = interval_data.findings
+                if findings and len(findings) > 0:
+                    category = findings[0].category if len(findings) > 0 else "BUG"
+                    issue = ""
+                else:
+                    category = "NORMAL"
+                    issue = None
+
+                analyzed_intervals.append(
+                    RecordingInterval(
+                        recording_id=recording_id,
+                        start_time=start_time_obj,
+                        end_time=end_time_obj,
+                        category=category,
+                        issue=issue,
+                        short_title=interval_data.short_title,
+                        timestamp_descriptions=processed_timestamp_descriptions_json,
+                        description=interval_data.description,
+                    )
+                )
+            
+            # Persist intervals
+            recording.analysis_progress = 90
+            repository.update(recording)
+            
+            has_intervals = recording_intervals_service.check_recording_intervals_with_recording_id(
+                db, recording_id
+            )
+            if has_intervals:
+                logger.info(f"Replacing existing intervals for recording {recording_id}")
+                recording_intervals_service.replace_recording_intervals(
+                    db, recording_id, analyzed_intervals
+                )
+            else:
+                logger.info(f"Creating new intervals for recording {recording_id}")
+                created_intervals = recording_intervals_service.batch_create_recording_intervals(
+                    db, analyzed_intervals
+                )
+            
+            # Process issues
+            if recording_has_issues(analyzed_intervals):
+                logger.info(f"Processing issues for recording {recording_id}")
+                all_findings = process_intervals_findings(analyzed_intervals, all_intervals)
+                process_issues(db, org_id, recording_id, all_findings)
+                issues = issue_repository.get_issues_by_recording(org_id, recording_id)
+                categories = [issue.category for issue in issues]
+                recording.tags = process_tags(categories)
+                logger.info(f"Issues processed for recording {recording_id}")
+            else:
+                logger.info(f"No issues found for recording {recording_id}")
+            
+            # Use the RecordingSummarizerGraph to generate the recording summary and title
+            logger.info(f"Generating summary and title for recording {recording_id}")
+            recording_summarizer = RecordingSummarizerGraph()
+            
+            # Create a detailed summary of all intervals for the summarizer
+            intervals_summary = []
+            for interval in analyzed_intervals:
+                interval_summary = f"Interval from {interval.start_time} to {interval.end_time}: {interval.short_title}\n"
+                interval_summary += f"Description: {interval.description}\n"
+                if interval.category != "NORMAL":
+                    interval_summary += f"Category: {interval.category}\n"
+                interval_summary += "---\n"
+                intervals_summary.append(interval_summary)
+            
+            full_intervals_summary = "\n".join(intervals_summary)
+            full_intervals_summary += f"\nTotal recording duration: {original_duration:.2f} seconds."
+            
+            # Call the recording summarizer graph
+            summary_response = recording_summarizer.summarize_recording(
+                org_id=str(org_id),
+                recording_id=str(recording_id),
+                recording_intervals_summary=full_intervals_summary
+            )
+            
+            recording_summary = summary_response.get("recording_summary")
+            
+            # Update final recording state
+            recording.summary = recording_summary.summary if recording_summary else full_intervals_summary
+            recording.short_title = recording_summary.short_title if recording_summary else f"Chunked Analysis of Recording {recording_id}"
+            recording.set_analysis_status(AnalysisStatus.COMPLETED)
+            recording.analysis_error = None
+            recording.analysis_progress = 100
+            
+            # Update file metadata if not already set
+            if recording.file_duration is None:
+                recording.file_duration = original_duration
+            
+            recording.file_size = get_file_size(local_recording_path)
+            repository.update(recording)
+            
+            logger.info(f"Chunked video analysis completed for recording {recording_id}")
+            return None
+            
+        finally:
+            # Clean up any remaining chunk files
+            logger.info(f"Cleaning up any remaining chunk files")
+            for _, (chunk_path, _, _) in enumerate(chunk_info):
+                if os.path.exists(chunk_path):
+                    try:
+                        os.remove(chunk_path)
+                    except Exception as e:
+                        logger.warning(f"Failed to remove chunk file {chunk_path}: {e}")
 
     except Exception as e:
         logger.error(
@@ -628,3 +801,258 @@ def analyze_local_recording_video(
                 exc_info=update_err,
             )
         return None
+
+def analyze_video_chunk(
+    org_id: str,
+    recording_id: str,
+    chunk_path: str,
+    start_seconds: float,
+    file_type: str,
+    video_graph: VideoRecordingAnalyzerGraph,
+    slowdown_factor: float = 1.0
+) -> Tuple[List[Any], float, float]:
+    """
+    Analyze a single video chunk and adjust timestamps.
+    
+    Args:
+        org_id: Organization ID
+        recording_id: Recording ID
+        chunk_path: Path to the chunk file
+        start_seconds: Start time of the chunk in slowed video (seconds)
+        file_type: File type of the video
+        video_graph: Initialized VideoRecordingAnalyzerGraph instance
+        slowdown_factor: Factor by which the video has been slowed down
+        
+    Returns:
+        Tuple containing (intervals, start_seconds, duration)
+    """
+    chunk_id = f"{recording_id}_chunk_{start_seconds}"
+    slowed_duration = 0
+    
+    # Get the duration of the chunk (already slowed)
+    try:
+        slowed_duration = get_recording_duration(chunk_path)
+        logger.info(f"Analyzing chunk starting at {start_seconds}s (slowed time) - Slowed duration: {slowed_duration:.2f}s")
+    except Exception as e:
+        logger.warning(f"Could not determine duration for chunk {chunk_path}: {e}")
+    
+    # Analyze the chunk with AI
+    logger.info(f"Running AI analysis on chunk {chunk_id} (from slowed video)")
+    chunk_analysis = video_graph.analyze_recording(
+        org_id=str(org_id),
+        recording_id=chunk_id,
+        recording_path=chunk_path,
+        file_type=file_type,
+    )
+    
+    # Process and adjust timestamps
+    chunk_recording_analysis = chunk_analysis.get("recording_analysis")
+    intervals = []
+    
+    if chunk_recording_analysis:
+        # Helper functions for time conversion
+        def time_to_seconds(time_str):
+            parts = time_str.split(":")
+            return int(parts[0]) * 60 + int(parts[1])
+        
+        def seconds_to_time(seconds):
+            return f"{int(seconds) // 60:02d}:{int(seconds) % 60:02d}"
+        
+        interval_count = len(chunk_recording_analysis.intervals)
+        logger.info(f"AI found {interval_count} intervals in the chunk - now adjusting timestamps")
+        
+        # Adjust timestamps to account for slowdown
+        for i, interval in enumerate(chunk_recording_analysis.intervals):
+            # Get slowed timestamps (as analyzed by AI)
+            slowed_start_seconds = time_to_seconds(interval.start_time)
+            slowed_end_seconds = time_to_seconds(interval.end_time)
+            
+            # Calculate original (real-time) positions
+            # 1. Convert relative chunk time to absolute slowed video time
+            absolute_slowed_start = slowed_start_seconds + start_seconds
+            absolute_slowed_end = slowed_end_seconds + start_seconds
+            
+            # 2. Convert slowed time to original time 
+            original_start_seconds = absolute_slowed_start / slowdown_factor
+            original_end_seconds = absolute_slowed_end / slowdown_factor
+            
+            # Update with adjusted timestamps
+            interval.start_time = seconds_to_time(original_start_seconds)
+            interval.end_time = seconds_to_time(original_end_seconds)
+            
+            # Adjust timestamps in descriptions
+            timestamp_count = len(interval.timestamp_descriptions)
+            for j, desc in enumerate(interval.timestamp_descriptions):
+                # Get slowed timestamp
+                slowed_ts_seconds = time_to_seconds(desc.timestamp)
+                
+                # Convert to absolute slowed time
+                absolute_slowed_ts = slowed_ts_seconds + start_seconds
+                
+                # Convert to original time
+                original_ts_seconds = absolute_slowed_ts / slowdown_factor
+                
+                
+                # Update the timestamp
+                desc.timestamp = seconds_to_time(original_ts_seconds)
+        
+        intervals = chunk_recording_analysis.intervals
+        
+        # Process each interval to consolidate timestamp descriptions
+        for interval in intervals:
+            try:
+                if hasattr(interval, 'timestamp_descriptions') and interval.timestamp_descriptions:
+                    # Extract the timestamp descriptions list
+                    ts_descriptions = interval.timestamp_descriptions
+                    
+                    # Skip if empty
+                    if not ts_descriptions:
+                        continue
+                    
+                    # Check if they're already dictionaries or need conversion
+                    ts_dict_list = []
+                    original_type = None
+                    
+                    try:
+                        if hasattr(ts_descriptions[0], 'model_dump'):
+                            # Save the original type for later conversion back
+                            original_type = type(ts_descriptions[0])
+                            # Convert Pydantic models to dictionaries
+                            ts_dict_list = [ts.model_dump() for ts in ts_descriptions]
+                        else:
+                            # Already dictionaries
+                            ts_dict_list = ts_descriptions
+                    except (IndexError, AttributeError):
+                        # Handle case where ts_descriptions is empty or doesn't have expected methods
+                        logger.warning(f"Could not process timestamp descriptions - index error or attribute error")
+                        continue
+                    
+                    # Skip if no valid descriptions after conversion
+                    if not ts_dict_list:
+                        continue
+                    
+                    # Consolidate timestamp descriptions
+                    logger.info(f"Consolidating {len(ts_dict_list)} timestamp descriptions...")
+                    consolidated_descriptions = consolidate_timestamp_descriptions(ts_dict_list)
+                    logger.info(f"Consolidated to {len(consolidated_descriptions)} unique timestamps")
+                    
+                    # Update the interval with consolidated descriptions only if we got valid results
+                    if consolidated_descriptions:
+                        # If we originally had Pydantic models, convert back to the same type
+                        if original_type and hasattr(original_type, 'model_validate'):
+                            try:
+                                # Convert dictionaries back to the original Pydantic model
+                                converted_descriptions = [
+                                    original_type.model_validate(desc) 
+                                    for desc in consolidated_descriptions
+                                ]
+                                interval.timestamp_descriptions = converted_descriptions
+                            except Exception as e:
+                                logger.error(f"Error converting back to Pydantic model: {str(e)}")
+                                # Fall back to using dictionaries
+                                interval.timestamp_descriptions = consolidated_descriptions
+                        else:
+                            # Use dictionaries directly
+                            interval.timestamp_descriptions = consolidated_descriptions
+            except Exception as e:
+                # Log error but continue processing other intervals
+                logger.error(f"Error processing timestamp descriptions: {str(e)}")
+                continue
+        
+        logger.info(f"Successfully adjusted timestamps for {interval_count} intervals from chunk {chunk_id}")
+    else:
+        logger.warning(f"No intervals found in chunk {chunk_id}")
+    
+    # Calculate original start time and duration
+    original_start_seconds = start_seconds / slowdown_factor
+    original_duration = slowed_duration / slowdown_factor
+    
+    # Return the adjusted intervals and original timing info
+    return intervals, original_start_seconds, original_duration
+
+def consolidate_timestamp_descriptions(timestamp_descriptions: list, time_threshold_seconds: int = 1) -> list:
+    """
+    Process timestamp descriptions to merge duplicate entries and similar descriptions
+    that appear at the same timestamp.
+    
+    Args:
+        timestamp_descriptions: List of timestamp description objects 
+        time_threshold_seconds: Not used anymore - kept for backwards compatibility
+        
+    Returns:
+        List of processed timestamp descriptions with duplicates consolidated
+    """
+    if not timestamp_descriptions:
+        return []
+    
+    try:
+        # Step 1: Standardize the input format and extract timestamps + descriptions
+        standardized_descriptions = []
+        
+        for item in timestamp_descriptions:
+            # Skip invalid entries
+            if not isinstance(item, dict):
+                continue
+                
+            timestamp = item.get("timestamp")
+            description = item.get("description")
+            
+            if not timestamp or not description:
+                continue
+                
+            standardized_descriptions.append({
+                "timestamp": timestamp,
+                "description": description
+            })
+        
+        if not standardized_descriptions:
+            return timestamp_descriptions  # Return original if no valid items
+            
+        # Step 2: Group by timestamp (exact match)
+        timestamp_groups = {}
+        for item in standardized_descriptions:
+            ts = item["timestamp"]
+            if ts not in timestamp_groups:
+                timestamp_groups[ts] = []
+            timestamp_groups[ts].append(item["description"])
+            
+        # Step 3: Generate consolidated output
+        consolidated = []
+        for timestamp, descriptions in sorted(timestamp_groups.items()):
+            # If only one description for this timestamp, keep as is
+            if len(descriptions) == 1:
+                consolidated.append({
+                    "timestamp": timestamp,
+                    "description": descriptions[0]
+                })
+                continue
+                
+            # Remove exact duplicates first
+            unique_descriptions = []
+            for desc in descriptions:
+                if desc not in unique_descriptions:
+                    unique_descriptions.append(desc)
+                    
+            # If we've reduced to one description, add it and continue
+            if len(unique_descriptions) == 1:
+                consolidated.append({
+                    "timestamp": timestamp,
+                    "description": unique_descriptions[0]
+                })
+                continue
+                
+            # Multiple different descriptions: combine them with a separator
+            # For production, you might want more sophisticated similarity checks here
+            combined = " ".join(unique_descriptions)
+            consolidated.append({
+                "timestamp": timestamp,
+                "description": combined
+            })
+            
+        return consolidated
+            
+    except Exception as e:
+        import traceback
+        print(f"Error consolidating timestamp descriptions: {e}")
+        print(traceback.format_exc())
+        return timestamp_descriptions  # Return original data on error

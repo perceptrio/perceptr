@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     # AI analysis settings
     AI_ANALYSIS_ENABLED: bool = False
     STALE_SESSION_DURATION: int = 3600  # 1 hour
+    RECORDING_INTERVAL_DURATION: int = 30  # 30 seconds chunk size
+    SLOW_DOWN_FACTOR: float = 1.0  # 1.0 means no slowdown set it to 2.0 for 2x slowdown
 
     class Config:
         env_file = ".env"
