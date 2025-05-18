@@ -1,5 +1,6 @@
 from api.v1.analytics.router import router as analytics_router
 from api.v1.chat.router import router as chat_router
+from api.v1.chat_message.router import router as chat_message_router
 from api.v1.email.router import router as email_router
 from api.v1.issue.router import router as issue_router
 from api.v1.org.router import router as org_router
@@ -33,6 +34,7 @@ app.include_router(issue_router)
 app.include_router(analytics_router)
 app.include_router(email_router)
 app.include_router(chat_router)
+app.include_router(chat_message_router)
 app.include_router(ws_router)
 # SDK router
 app.include_router(per_router)

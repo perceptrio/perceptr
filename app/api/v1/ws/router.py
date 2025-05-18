@@ -1,9 +1,17 @@
 from typing import Dict
 
-from api.v1.chat.service import ChatService
+from api.v1.chat import service as chat_service
+from api.v1.chat_message import service as chat_message_service
 from common.services.logger import logger
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
+from database import get_db
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, status
+from requests import Session
 from utils.auth import validate_org_token
+
+from app.api.v1.chat.schema import ChatCreate
+from app.api.v1.chat_message.schema import ChatMessageCreate
+
+from . import service as ws_service
 
 router = APIRouter(prefix="/ws", tags=["ws"])
 
@@ -22,57 +30,5 @@ def get_token_from_header(websocket: WebSocket) -> str | None:
 
 
 @router.websocket_route("/ws", name="ws")
-async def websocket_handler(websocket: WebSocket):
-    client_ip = websocket.client.host
-    token = get_token_from_header(websocket)
-    if not token:
-        logger.error("No token provided for websocket connection", client_ip=client_ip)
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-        return
-    if client_ip in active_connections:
-        logger.warning(
-            "WebSocket connection already established",
-            client_ip=client_ip,
-        )
-        await websocket.close(
-            code=status.WS_1008_POLICY_VIOLATION,
-            reason="Only one connection per IP allowed.",
-        )
-        return
-    try:
-        org_id = await validate_org_token(token)
-    except Exception as e:
-        logger.error("Invalid token", exc_info=e, client_ip=client_ip)
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason=str(e))
-        return
-    await websocket.accept()
-    active_connections[client_ip] = websocket
-    logger.info(
-        "WebSocket connection established",
-        org_id=org_id,
-        client_ip=client_ip,
-    )
-    chat_service = ChatService(org_id)
-    try:
-        while True:
-            data = await websocket.receive_json()
-            service = data.get("service")
-            if service == "chat":
-                chat_id = data.get("chat_id")
-                message_type = data.get("type")
-                response = await chat_service.process_message(
-                    chat_id, message_type, data
-                )
-            else:
-                response = {"error": "Invalid service"}
-            await websocket.send_json(response)
-    except WebSocketDisconnect:
-        logger.info("WebSocket disconnected", client_ip=client_ip)
-    except Exception as e:
-        logger.error("WebSocket error", exc_info=e)
-        await websocket.close(
-            code=status.WS_1011_INTERNAL_ERROR, reason="Internal error"
-        )
-    finally:
-        if client_ip in active_connections:
-            del active_connections[client_ip]
+async def websocket_handler(websocket: WebSocket, db: Session = Depends(get_db)):
+    await ws_service.handle_websocket(websocket, db)
