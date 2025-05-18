@@ -36,6 +36,9 @@ from common.services.qdrant import Qdrant
 import json
 from langchain_core.documents import Document
 from qdrant_client import models
+from langchain_cohere import CohereRerank
+from langchain.retrievers import ContextualCompressionRetriever
+
 
 # Type variables for the decorator
 F = TypeVar("F", bound=Callable[..., Any])
@@ -1129,7 +1132,7 @@ def search_knowledge_base(db: Session, org_id: int, query: str):
         #     ]
         # ))
 
-        retriever = qdrant.get_qdrant().as_retriever(search_type="mmr", search_kwargs={"k": 30, "filter": models.Filter(
+        retriever = qdrant.get_qdrant().as_retriever(search_type="similarity", search_kwargs={"k": 30, "filter": models.Filter(
             must=[
                 models.FieldCondition(
                     key="metadata.org_id",
@@ -1138,7 +1141,20 @@ def search_knowledge_base(db: Session, org_id: int, query: str):
             ]
         )})
 
-        results = retriever.invoke(query)
+        # results = retriever.invoke(query)
+
+        # Create Cohere's reranker with the vector DB using Cohere's embeddings as the base retriever
+        reranker = CohereRerank(
+            cohere_api_key=settings.COHERE_API_KEY, model="rerank-v3.5", top_n=30
+        )
+        compression_retriever = ContextualCompressionRetriever(
+            base_compressor=reranker, base_retriever=retriever
+        )
+        results = compression_retriever.invoke(
+            query
+        )
+        # Print the relevant documents from using the embeddings and reranker
+        # print(compressed_docs)
 
 
         return results
