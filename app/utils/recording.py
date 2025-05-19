@@ -166,12 +166,6 @@ def ffmpeg_slow_down_video(
             "- Windows: Download from https://ffmpeg.org/download.html"
         )
     
-    # Detect input and output format
-    _, input_ext = os.path.splitext(video_path)
-    _, output_ext = os.path.splitext(output_path)
-    input_ext = input_ext.lower()
-    output_ext = output_ext.lower()
-    
     # Prepare hardware acceleration if enabled
     hw_accel = []
     if use_hardware_accel:
@@ -219,20 +213,8 @@ def ffmpeg_slow_down_video(
             *audio_filter
         ]
         
-        # Add codec options based on output format
-        if output_ext == '.webm':
-            # WebM requires VP8, VP9 or AV1
-            cmd.extend(['-c:v', 'libvpx-vp9'])
-        elif use_hardware_accel and system == 'darwin' and output_ext in ['.mp4', '.mov']:
-            # Use hardware encoding on Mac if available
-            cmd.extend(['-c:v', 'h264_videotoolbox'])
-        elif use_hardware_accel and system == 'windows' and nvidia_check.returncode == 0:
-            # Use NVIDIA hardware encoding if available
-            cmd.extend(['-c:v', 'h264_nvenc'])
-        else:
-            # Let FFmpeg choose the best codec for the container
-            # This will typically be h264 for MP4/MOV, etc.
-            cmd.extend(['-c:v', 'libx264', '-preset', 'fast'])
+        # Let FFmpeg automatically select the appropriate codec based on the output format
+        # This removes explicit codec selection and lets FFmpeg decide
         
         # Add output path
         cmd.append(output_path)
@@ -255,7 +237,7 @@ def ffmpeg_chunk_video(
     video_path: str, 
     chunk_size_seconds: int = 30,
     output_dir: str = None,
-    codec: str = None  # Let's make this optional and auto-detect
+    codec: str = None  # Keeping parameter for backward compatibility, but we won't use it
 ) -> List[Tuple[str, float, float]]:
     """
     Split a video into chunks of specified duration using FFmpeg.
@@ -296,14 +278,6 @@ def ffmpeg_chunk_video(
     base_filename, file_ext = os.path.splitext(base_name)
     file_ext = file_ext.lower()
     
-    # Get codec options if a specific codec was requested
-    codec_options = []
-    if codec:
-        codec_options = ['-c:v', codec]
-    elif file_ext == '.webm':
-        # WebM requires VP8, VP9 or AV1
-        codec_options = ['-c:v', 'libvpx-vp9']
-    
     # Make sure output directory exists
     os.makedirs(output_dir, exist_ok=True)
     
@@ -321,7 +295,7 @@ def ffmpeg_chunk_video(
         
         # Optimize: for small videos with few chunks (1-3), it's faster to extract in a single command
         if chunk_count <= 3:
-            return ffmpeg_chunk_video_optimized(video_path, chunk_size_seconds, output_dir, codec, total_duration, file_ext)
+            return ffmpeg_chunk_video_optimized(video_path, chunk_size_seconds, output_dir, None, total_duration, file_ext)
         
         # Store information about created chunks
         chunk_info = []
@@ -346,7 +320,6 @@ def ffmpeg_chunk_video(
                     '-ss', str(start_seconds),  # Start time
                     '-i', video_path,  # Input file
                     '-t', str(duration),  # Duration
-                    *codec_options,  # Video codec options (if specified)
                     '-avoid_negative_ts', '1',  # Handle negative timestamps
                     '-reset_timestamps', '1',  # Reset timestamps
                     chunk_path  # Output file
@@ -359,7 +332,6 @@ def ffmpeg_chunk_video(
                     '-i', video_path,  # Input file
                     '-ss', str(start_seconds),  # Start time
                     '-t', str(duration),  # Duration
-                    *codec_options,  # Video codec options (if specified)
                     '-avoid_negative_ts', '1',  # Handle negative timestamps
                     '-reset_timestamps', '1',  # Reset timestamps
                     chunk_path  # Output file
@@ -388,7 +360,7 @@ def ffmpeg_chunk_video_optimized(
     video_path: str, 
     chunk_size_seconds: int = 30,
     output_dir: str = None,
-    codec: str = None,
+    codec: str = None,  # Keeping parameter for backward compatibility, but we won't use it
     total_duration: float = None,
     file_ext: str = None
 ) -> List[Tuple[str, float, float]]:
@@ -417,14 +389,6 @@ def ffmpeg_chunk_video_optimized(
         base_name = os.path.basename(video_path)
         base_filename, _ = os.path.splitext(base_name)
     
-    # Get codec options if a specific codec was requested
-    codec_options = []
-    if codec:
-        codec_options = ['-c:v', codec]
-    elif file_ext == '.webm':
-        # WebM requires VP8, VP9 or AV1
-        codec_options = ['-c:v', 'libvpx-vp9']
-    
     # Get duration if not provided
     if total_duration is None:
         try:
@@ -443,7 +407,6 @@ def ffmpeg_chunk_video_optimized(
         'ffmpeg',
         '-y',
         '-i', video_path,
-        *codec_options,  # Video codec (if specified)
         '-map', '0',
         '-f', 'segment',
         '-segment_time', str(chunk_size_seconds),

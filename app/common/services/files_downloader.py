@@ -17,7 +17,10 @@ class FilesDownloader:
         logger.info(f"Temporary folder created: {self.temp_dir}")
 
     def download_file_from_s3(self, key: str) -> str:
-        local_file_path = os.path.join(self.temp_dir, os.path.basename(key))
+        file_name = os.path.basename(key)
+        if file_name.endswith('.quicktime'):
+            file_name = file_name.replace('.quicktime', '.mov')
+        local_file_path = os.path.join(self.temp_dir, file_name)
         self.s3_client.download_file(self.bucket_name, key, local_file_path)
         logger.info(f"Downloaded {key} to {local_file_path}")
         return local_file_path
