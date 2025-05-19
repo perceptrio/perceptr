@@ -10,7 +10,7 @@ def send_message(db: Session, message: ChatMessageCreate) -> ChatMessage:
     message = ChatMessage(
         chat_id=message.chat_id,
         type="user",
-        query=message.query,
+        data={"query": message.query},
     )
     # TODO: hook with graph
     return repo.create(message)

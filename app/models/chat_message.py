@@ -10,8 +10,7 @@ class ChatMessage(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     chat_id = Column(Integer, ForeignKey("chat.id"), nullable=False)
     type = Column(Text, nullable=False)  # user, metric, session, issue, markdown
-    query = Column(Text, nullable=True)
-    response = Column(JSON, nullable=True)
+    data = Column(JSON, nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(UTC))
     updated_at = Column(
         DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
