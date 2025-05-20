@@ -232,8 +232,8 @@ def upsert_session_for_batch(db: Session, org_id: int, session_id: str) -> Recor
 
 
 def check_and_process_stale_recording(db: Session, org_id: int, session_id: str):
-    """Background task that waits 1 hour, then checks if the recording is still not processed and updated_at > 1 hour ago, and if so, triggers processing."""
-    time.sleep(settings.STALE_SESSION_DURATION)
+    """Background task that waits duration + 5 seconds grace period, then checks if the recording is still not processed and updated_at > STALE_SESSION_DURATION ago, and if so, triggers processing."""
+    time.sleep(settings.STALE_SESSION_DURATION + 5)
     recording = recording_service.get_recording_by_session_id(session_id, org_id, db)
     if not recording:
         # TODO: maybe add a cleaner to delete stale batches in s3?

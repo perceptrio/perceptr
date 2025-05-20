@@ -39,3 +39,13 @@ def create_refresh_token(data: CreateTokenPayload) -> str:
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, REFRESH_SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
+
+
+async def validate_org_token(
+    token: str, secret_key: str = SECRET_KEY, algorithm: str = ALGORITHM
+) -> int:
+    payload = jwt.decode(token, secret_key, algorithms=[algorithm])
+    org_id = payload.get("org_id")
+    if not org_id:
+        raise ValueError("Invalid token: org_id missing")
+    return org_id
