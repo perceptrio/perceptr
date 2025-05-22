@@ -1,15 +1,9 @@
 from typing import Dict
 
-from api.v1.chat import service as chat_service
-from api.v1.chat_message import service as chat_message_service
 from common.services.logger import logger
 from database import get_db
-from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, Depends, WebSocket
 from requests import Session
-from utils.auth import validate_org_token
-
-from app.api.v1.chat.schema import ChatCreate
-from app.api.v1.chat_message.schema import ChatMessageCreate
 
 from . import service as ws_service
 
