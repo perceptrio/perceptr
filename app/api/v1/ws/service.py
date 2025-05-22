@@ -1,13 +1,12 @@
 from typing import Dict, Optional
 
 from api.v1.chat import service as chat_service
+from api.v1.chat.schema import ChatCreate
 from api.v1.chat_message import service as chat_message_service
+from api.v1.chat_message.schema import ChatMessageCreate
 from common.services.logger import logger
 from fastapi import WebSocket, WebSocketDisconnect, status
 from utils.auth import validate_org_token
-
-from app.api.v1.chat.schema import ChatCreate
-from app.api.v1.chat_message.schema import ChatMessageCreate
 
 # Maps org_id to WebSocket
 active_connections: Dict[str, WebSocket] = {}
