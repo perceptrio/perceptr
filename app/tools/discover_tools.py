@@ -29,11 +29,14 @@ def filter_sessions(query: str, config: RunnableConfig) -> str:
     try:
         # Extract org_id from config
         org_id = config.get("configurable", {}).get("org_id")
+        logger.info(f"org_id: {org_id}")
         if not org_id:
             raise ValueError("org_id not found in config")
         
         top_n = config.get("configurable", {}).get("top_n", 5)
         top_k = config.get("configurable", {}).get("top_k", 30)
+        logger.info(f"top_n: {top_n}")
+        logger.info(f"top_k: {top_k}")
             
         qdrant = Qdrant()
 

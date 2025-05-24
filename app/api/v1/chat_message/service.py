@@ -1,5 +1,5 @@
 from models.chat_message import ChatMessage
-from requests import Session
+from sqlalchemy.orm import Session
 
 from .repository import ChatMessageRepository
 from .schema import ChatMessageCreate, ChatMessageUpdate

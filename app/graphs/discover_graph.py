@@ -61,7 +61,7 @@ class DiscoverGraph:
 
     @observe()  # type: ignore[misc]
     def discover(
-        self, org_id: str, chat_id: str, query: str
+        self, org_id: int, chat_id: int, query: str
     ) -> Dict[str, Any]:
         langfuse_context.update_current_trace(
             session_id=chat_id,

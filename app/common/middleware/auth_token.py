@@ -8,7 +8,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import ExpiredSignatureError, JWTError, jwt
 from models.org import Org
-from requests import Session
+from sqlalchemy.orm import Session
 from utils.auth import ALGORITHM, REFRESH_SECRET_KEY, SECRET_KEY
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/v1/orgs/token")
