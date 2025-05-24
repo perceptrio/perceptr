@@ -61,7 +61,7 @@ class DiscoverGraph:
 
     @observe()  # type: ignore[misc]
     def discover(
-        self, org_id: int, chat_id: int, query: str
+        self, org_id: int, chat_id: int, messages: list[BaseMessage]
     ) -> Dict[str, Any]:
         langfuse_context.update_current_trace(
             session_id=chat_id,
@@ -82,11 +82,9 @@ class DiscoverGraph:
         }
         
         # Create initial messages with the user query
-        initial_messages = [HumanMessage(content=query)]
-        
         try:
             resp = self.graph.invoke(
-                {"messages": initial_messages},
+                {"messages": messages},
                 config=config,
                 debug=True
             )

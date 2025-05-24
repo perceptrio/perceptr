@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from graphs.discover_graph import DiscoverGraph
 from api.v1.chat_message.repository import ChatMessageRepository
 from common.services.logger import logger
+from utils.graph import convert_chat_messages_to_langchain_messages
 
 from .repository import ChatRepository
 from .schema import ChatCreate, ChatUpdate, DiscoverRequest
@@ -74,6 +75,9 @@ def discover(db: Session, org_id: int, request: DiscoverRequest) -> dict:
         data={"query": request.query}
     )
     user_message = message_repo.create(user_message)
+
+    chat_messages = message_repo.get_all(chat.id)
+    langchain_messages = convert_chat_messages_to_langchain_messages(chat_messages)
     
     # Initialize and invoke discover graph
     discover_graph = DiscoverGraph()
@@ -83,58 +87,55 @@ def discover(db: Session, org_id: int, request: DiscoverRequest) -> dict:
         graph_response = discover_graph.discover(
             org_id=org_id,
             chat_id=chat.id,
-            query=request.query
+            messages=langchain_messages
         )
         
         # Extract the assistant response from the graph
         messages = graph_response.get("messages", [])
-        assistant_content = ""
+        assistant_content = messages[-1].content
         
         # Find the last assistant message in the response
-        for message in reversed(messages):
-            if hasattr(message, 'type') and message.type == 'ai':
-                assistant_content = message.content
-                break
+        # for message in reversed(messages):
+        #     if hasattr(message, 'type') and message.type == 'ai':
+        #         assistant_content = message.content
+        #         break
         
         # Convert LangChain messages to serializable format
-        serializable_messages = []
-        for message in messages:
-            try:
-                if hasattr(message, 'content') and hasattr(message, 'type'):
-                    # Ensure all values are JSON serializable
-                    additional_kwargs = getattr(message, 'additional_kwargs', {})
-                    if not isinstance(additional_kwargs, dict):
-                        additional_kwargs = {}
+        # serializable_messages = []
+        # for message in messages:
+        #     try:
+        #         if hasattr(message, 'content') and hasattr(message, 'type'):
+        #             # Ensure all values are JSON serializable
+        #             additional_kwargs = getattr(message, 'additional_kwargs', {})
+        #             if not isinstance(additional_kwargs, dict):
+        #                 additional_kwargs = {}
                     
-                    message_id = getattr(message, 'id', None)
-                    if message_id and not isinstance(message_id, (str, int, type(None))):
-                        message_id = str(message_id)
+        #             message_id = getattr(message, 'id', None)
+        #             if message_id and not isinstance(message_id, (str, int, type(None))):
+        #                 message_id = str(message_id)
                     
-                    serializable_messages.append({
-                        "type": str(message.type),
-                        "content": str(message.content),
-                        "additional_kwargs": additional_kwargs,
-                        "id": message_id
-                    })
-            except Exception as msg_error:
-                logger.warning(f"Failed to serialize message: {msg_error}")
-                # Add a fallback message
-                serializable_messages.append({
-                    "type": "unknown",
-                    "content": "Message could not be serialized",
-                    "additional_kwargs": {},
-                    "id": None
-                })
+        #             serializable_messages.append({
+        #                 "type": str(message.type),
+        #                 "content": str(message.content),
+        #                 "additional_kwargs": additional_kwargs,
+        #                 "id": message_id
+        #             })
+        #     except Exception as msg_error:
+        #         logger.warning(f"Failed to serialize message: {msg_error}")
+        #         # Add a fallback message
+        #         serializable_messages.append({
+        #             "type": "unknown",
+        #             "content": "Message could not be serialized",
+        #             "additional_kwargs": {},
+        #             "id": None
+        #         })
         
         # Save assistant message
         assistant_message = ChatMessage(
             chat_id=chat.id,
-            type="assistant",
+            type="markdown",
             data={
                 "content": assistant_content,
-                "full_response": {
-                    "messages": serializable_messages
-                }
             }
         )
         assistant_message = message_repo.create(assistant_message)
@@ -160,17 +161,5 @@ def discover(db: Session, org_id: int, request: DiscoverRequest) -> dict:
     except Exception as e:
         # Rollback the database session to clean up any failed transactions
         db.rollback()
-        
-        try:
-            # Save error message
-            error_message = ChatMessage(
-                chat_id=chat.id,
-                type="error",
-                data={"error": str(e)}
-            )
-            error_message = message_repo.create(error_message)
-        except Exception as save_error:
-            # If we can't save the error message, just log it
-            logger.error(f"Failed to save error message: {save_error}", exc_info=save_error)
-        
+        logger.error(f"Error processing discover request: {str(e)}", exc_info=e)
         raise Exception(f"Error processing discover request: {str(e)}")
