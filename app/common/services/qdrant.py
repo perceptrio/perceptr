@@ -52,6 +52,16 @@ class Qdrant:
             vector_name="dense",
             sparse_vector_name="sparse",
         )
+
+    def get_count(self, org_id: int) -> int:
+        return self.client.count(collection_name=self.collection_name, count_filter=rest_models.Filter(
+             must=[
+                rest_models.FieldCondition(
+                    key="metadata.org_id",
+                    match=rest_models.MatchValue(value=org_id)
+                )
+            ]
+        ))
         
 
     def get_qdrant(self) -> QdrantVectorStore:

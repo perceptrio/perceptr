@@ -1098,6 +1098,7 @@ def add_recording_to_qdrant(db: Session, recording_id: int, org_id: int):
             "session_id": recording.session_id,
             "client_id": recording.client_id,
             "client_data": recording.client_data,
+            "created_at": recording.created_at,
         }
 
         document = Document(page_content=page_content, metadata=metadata)

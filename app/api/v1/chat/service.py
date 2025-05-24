@@ -5,9 +5,10 @@ from graphs.discover_graph import DiscoverGraph
 from api.v1.chat_message.repository import ChatMessageRepository
 from common.services.logger import logger
 from utils.graph import convert_chat_messages_to_langchain_messages
-
+from common.services.qdrant import Qdrant
 from .repository import ChatRepository
 from .schema import ChatCreate, ChatUpdate, DiscoverRequest
+
 
 
 def create_chat(db: Session, org_id: int, chat: ChatCreate) -> Chat:
@@ -78,6 +79,9 @@ def discover(db: Session, org_id: int, request: DiscoverRequest) -> dict:
 
     chat_messages = message_repo.get_all(chat.id)
     langchain_messages = convert_chat_messages_to_langchain_messages(chat_messages)
+
+    qdrant = Qdrant()
+    total_num_sessions = qdrant.get_count(org_id)
     
     # Initialize and invoke discover graph
     discover_graph = DiscoverGraph()
@@ -87,7 +91,8 @@ def discover(db: Session, org_id: int, request: DiscoverRequest) -> dict:
         graph_response = discover_graph.discover(
             org_id=org_id,
             chat_id=chat.id,
-            messages=langchain_messages
+            messages=langchain_messages,
+            total_num_sessions=total_num_sessions
         )
         
         # Extract the assistant response from the graph

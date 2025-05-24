@@ -1,6 +1,6 @@
 import os
 from typing import Any, Dict, List, Annotated
-
+from datetime import datetime
 from common.services.logger import logger
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, AnyMessage
 from langchain_core.runnables import RunnableConfig
@@ -38,10 +38,25 @@ class DiscoverGraph:
 
     def discover_node(self, state: State, config: RunnableConfig) -> dict:
         # Create react agent with filter_sessions tool
+
+        total_num_sessions = config.get("configurable", {}).get("total_num_sessions")
+
+        system_prompt = f"""
+        You are an expert UI/UX researcher with access to user session data.
+        Your goal is to answer the user's question based on the user session data.
+
+        Total number of user sessions: {total_num_sessions}
+        Today's date: {datetime.now().strftime("%Y-%m-%d")}
+
+        You have access to the following tools:
+        - filter_sessions: to search for relevant user sessions based on the query
+ 
+        """
+
         react_agent = create_react_agent(
             self.openai_llm, 
             [filter_sessions],
-            prompt="You are an expert UI/UX researcher with access to user session data. Use the filter_sessions tool to search for relevant user sessions based on the query, then provide a comprehensive analysis and answer based on the retrieved session data."
+            prompt=system_prompt
         )
         
         # Get the current messages from state
@@ -61,7 +76,7 @@ class DiscoverGraph:
 
     @observe()  # type: ignore[misc]
     def discover(
-        self, org_id: int, chat_id: int, messages: list[BaseMessage]
+        self, org_id: int, chat_id: int, messages: list[BaseMessage], total_num_sessions: int
     ) -> Dict[str, Any]:
         langfuse_context.update_current_trace(
             session_id=chat_id,
@@ -77,6 +92,7 @@ class DiscoverGraph:
                 "org_id": org_id,
                 "top_n": 5,
                 "top_k": 30,
+                "total_num_sessions": total_num_sessions,
             },
             "callbacks": [langfuse_handler],
         }
