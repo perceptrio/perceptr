@@ -38,7 +38,7 @@ def filter_sessions(query: str, config: RunnableConfig) -> str:
         logger.info(f"top_n: {top_n}")
         logger.info(f"top_k: {top_k}")
             
-        qdrant = Qdrant()
+        qdrant = Qdrant(collection_name="sessions")
 
         retriever = qdrant.get_qdrant().as_retriever(search_type="similarity", search_kwargs={"k": top_k, "filter": models.Filter(
             must=[

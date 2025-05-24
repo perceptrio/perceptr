@@ -49,7 +49,7 @@ class DiscoverGraph:
         Today's date: {datetime.now().strftime("%Y-%m-%d")}
 
         You have access to the following tools:
-        - filter_sessions: to search for relevant user sessions based on the query
+        - filter_sessions: to search for relevant user sessions based on the query, don't input the query as is, but extract relevant information from the query and use it to filter the sessions.
  
         """
 
@@ -90,8 +90,8 @@ class DiscoverGraph:
                 # Checkpoints are accessed by thread_id
                 "thread_id": chat_id,
                 "org_id": org_id,
-                "top_n": 5,
-                "top_k": 30,
+                "top_n": 15,
+                "top_k": total_num_sessions,
                 "total_num_sessions": total_num_sessions,
             },
             "callbacks": [langfuse_handler],

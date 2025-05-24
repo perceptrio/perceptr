@@ -80,7 +80,7 @@ def discover(db: Session, org_id: int, request: DiscoverRequest) -> dict:
     chat_messages = message_repo.get_all(chat.id)
     langchain_messages = convert_chat_messages_to_langchain_messages(chat_messages)
 
-    qdrant = Qdrant()
+    qdrant = Qdrant(collection_name="sessions")
     total_num_sessions = qdrant.get_count(org_id)
     
     # Initialize and invoke discover graph

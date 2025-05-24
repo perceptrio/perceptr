@@ -1072,7 +1072,7 @@ def consolidate_timestamp_descriptions(timestamp_descriptions: list, time_thresh
 
 def add_recording_to_qdrant(db: Session, recording_id: int, org_id: int):
     try:
-        qdrant = Qdrant()
+        qdrant = Qdrant(collection_name="sessions")
         recording = get_recording(db, recording_id, org_id)
         if recording.analysis_status != AnalysisStatus.COMPLETED or recording.deleted_at is not None:
             logger.info(f"Recording {recording_id} is not completed or deleted, skipping")
@@ -1099,6 +1099,7 @@ def add_recording_to_qdrant(db: Session, recording_id: int, org_id: int):
             "client_id": recording.client_id,
             "client_data": recording.client_data,
             "created_at": recording.created_at,
+            "duration": recording.file_duration,
         }
 
         document = Document(page_content=page_content, metadata=metadata)
@@ -1123,7 +1124,7 @@ def add_all_recordings_to_qdrant(db: Session, org_id: int):
 
 def search_knowledge_base(db: Session, org_id: int, query: str):
     try:
-        qdrant = Qdrant()
+        qdrant = Qdrant(collection_name="sessions")
         # results = qdrant.get_qdrant().similarity_search_with_relevance_scores(query, k=30, filter=models.Filter(
         #     must=[
         #         models.FieldCondition(

@@ -14,9 +14,9 @@ from langchain_qdrant import FastEmbedSparse, QdrantVectorStore, RetrievalMode
 from qdrant_client.http.models import Distance, SparseVectorParams, VectorParams
 
 class Qdrant:
-    def __init__(self):
-        self.collection_name = settings.QDRANT_COLLECTION_NAME
-        self.embeddings = OpenAIEmbeddings(api_key=settings.OPENAI_API_KEY, model="text-embedding-3-large")
+    def __init__(self, collection_name: str):
+        self.collection_name = collection_name
+        self.embeddings = OpenAIEmbeddings(api_key=settings.OPENAI_API_KEY, model="text-embedding-3-small")
         self.sparse_embeddings = FastEmbedSparse(model_name="Qdrant/bm25")
 
         # Initialize Qdrant client
@@ -32,7 +32,7 @@ class Qdrant:
                 # 3072
                 # 1536
                 # vectors_config=rest_models.VectorParams(size=1536, distance=rest_models.Distance.COSINE),
-                vectors_config={"dense": VectorParams(size=3072, distance=Distance.COSINE)},
+                vectors_config={"dense": VectorParams(size=1536, distance=Distance.COSINE)},
                 sparse_vectors_config={
                     "sparse": SparseVectorParams(index=rest_models.SparseIndexParams(on_disk=False))
                 },
