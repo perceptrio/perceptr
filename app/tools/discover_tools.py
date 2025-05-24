@@ -64,7 +64,7 @@ def filter_sessions(query: str, config: RunnableConfig) -> str:
         
         formatted_results = []
         for i, doc in enumerate(results, 1):
-            session_data = f"Session {i}:\n"
+            session_data = f"Session {doc.metadata['session_id']}:\n"
             session_data += f"Content: {doc.page_content}\n"
             if doc.metadata:
                 session_data += f"Metadata: {doc.metadata}\n"

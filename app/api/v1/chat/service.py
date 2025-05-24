@@ -2,6 +2,7 @@ from models.chat import Chat
 from models.chat_message import ChatMessage
 from sqlalchemy.orm import Session
 from graphs.discover_graph import DiscoverGraph
+from langgraph.checkpoint.memory import MemorySaver
 from api.v1.chat_message.repository import ChatMessageRepository
 from common.services.logger import logger
 from utils.graph import convert_chat_messages_to_langchain_messages
@@ -9,7 +10,7 @@ from common.services.qdrant import Qdrant
 from .repository import ChatRepository
 from .schema import ChatCreate, ChatUpdate, DiscoverRequest
 
-
+memory = MemorySaver()
 
 def create_chat(db: Session, org_id: int, chat: ChatCreate) -> Chat:
     repo = ChatRepository(db)
@@ -84,7 +85,7 @@ def discover(db: Session, org_id: int, request: DiscoverRequest) -> dict:
     total_num_sessions = qdrant.get_count(org_id)
     
     # Initialize and invoke discover graph
-    discover_graph = DiscoverGraph()
+    discover_graph = DiscoverGraph(memory=memory)
     
     try:
         # Invoke the discover graph
@@ -97,7 +98,8 @@ def discover(db: Session, org_id: int, request: DiscoverRequest) -> dict:
         
         # Extract the assistant response from the graph
         messages = graph_response.get("messages", [])
-        assistant_content = messages[-1].content
+        structured_response = graph_response.get("structured_response", None)
+        # assistant_content = messages[-1].content
         
         # Find the last assistant message in the response
         # for message in reversed(messages):
@@ -139,9 +141,7 @@ def discover(db: Session, org_id: int, request: DiscoverRequest) -> dict:
         assistant_message = ChatMessage(
             chat_id=chat.id,
             type="markdown",
-            data={
-                "content": assistant_content,
-            }
+            data=structured_response.model_dump()
         )
         assistant_message = message_repo.create(assistant_message)
         
