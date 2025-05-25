@@ -12,18 +12,9 @@ from utils.auth import validate_org_token
 active_connections: Dict[str, WebSocket] = {}
 
 
-def get_token_from_header(websocket: WebSocket) -> Optional[str]:
-    auth_header = websocket.headers.get("authorization")
-    if not auth_header:
-        return None
-    if not auth_header.lower().startswith("bearer "):
-        return None
-    return auth_header[7:]
-
-
 async def handle_websocket(websocket: WebSocket, db):
     client_ip = websocket.client.host
-    token = get_token_from_header(websocket)
+    token = websocket.query_params.get("token")
     if not token:
         logger.error("No token provided for websocket connection", client_ip=client_ip)
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
