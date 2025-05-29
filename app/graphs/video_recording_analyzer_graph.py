@@ -89,10 +89,9 @@ class VideoRecordingAnalyzerGraph:
         self.gemini_llm = ChatGoogleGenerativeAI(
             api_key=settings.GEMINI_API_KEY,
             # model="gemini-2.5-pro-preview-05-06",
-            model="gemini-2.5-flash-preview-04-17",
-            # model="gemini-2.0-flash",
+            model="gemini-2.5-flash-preview-05-20",
             streaming=True,
-            temperature=0,
+            temperature=0.2,
         )
         # Configure genai client for file uploads
         # genai.configure(api_key=settings.GEMINI_API_KEY)

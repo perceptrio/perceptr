@@ -32,6 +32,13 @@ from .schema import (
     RecordingUploadUrl,
 )
 from settings import settings
+from common.services.qdrant import Qdrant
+import json
+from langchain_core.documents import Document
+from qdrant_client import models
+from langchain_cohere import CohereRerank
+from langchain.retrievers import ContextualCompressionRetriever
+
 
 # Type variables for the decorator
 F = TypeVar("F", bound=Callable[..., Any])
@@ -766,6 +773,11 @@ def analyze_local_recording_video(
             repository.update(recording)
             
             logger.info(f"Chunked video analysis completed for recording {recording_id}")
+
+            logger.info(f"Adding recording {recording_id} to Qdrant")
+            add_recording_to_qdrant(db, recording_id, org_id)
+            logger.info(f"Added recording {recording_id} to Qdrant")
+
             return None
             
         finally:
@@ -1056,3 +1068,100 @@ def consolidate_timestamp_descriptions(timestamp_descriptions: list, time_thresh
         print(f"Error consolidating timestamp descriptions: {e}")
         print(traceback.format_exc())
         return timestamp_descriptions  # Return original data on error
+
+
+def add_recording_to_qdrant(db: Session, recording_id: int, org_id: int):
+    try:
+        qdrant = Qdrant(collection_name="sessions")
+        recording = get_recording(db, recording_id, org_id)
+        if recording.analysis_status != AnalysisStatus.COMPLETED or recording.deleted_at is not None:
+            logger.info(f"Recording {recording_id} is not completed or deleted, skipping")
+            return
+        
+        recording_intervals = recording_intervals_service.get_recording_intervals_by_recording_id(db, recording_id)
+        timestamp_descriptions = []
+        for interval in recording_intervals:
+            timestamp_descriptions.extend(interval.timestamp_descriptions)
+
+        page_content=""
+        for timestamp_description in timestamp_descriptions:
+            page_content += f"{timestamp_description['timestamp']} - {timestamp_description['description']}\n"
+
+        if page_content == "":
+            logger.info(f"Recording {recording_id} has no page content, skipping")
+            return
+
+        metadata = {
+            "recording_id": recording_id,
+            "org_id": org_id,
+            "recording_name": recording.file_name,
+            "session_id": recording.session_id,
+            "client_id": recording.client_id,
+            "client_data": recording.client_data,
+            "created_at": recording.created_at,
+            "duration": recording.file_duration,
+        }
+
+        document = Document(page_content=page_content, metadata=metadata)
+        logger.info(f"Adding recording {recording_id} document to Qdrant")
+        qdrant.get_qdrant().add_documents([document])
+        logger.info(f"Added recording {recording_id} document to Qdrant")
+    except Exception as e:
+        logger.error(f"Error adding recording {recording_id} to Qdrant: {e}")
+        raise e
+
+
+def add_all_recordings_to_qdrant(db: Session, org_id: int):
+    try:
+        logger.info(f"Adding all recordings to Qdrant for org {org_id}")
+        recordings = get_recordings(db, org_id=org_id)
+        for recording in recordings:
+            add_recording_to_qdrant(db, recording.id, org_id)
+        logger.info(f"Added {len(recordings)} recordings to Qdrant for org {org_id}")
+    except Exception as e:
+        logger.error(f"Error adding all recordings to Qdrant for org {org_id}: {e}")
+        raise e
+
+def search_knowledge_base(db: Session, org_id: int, query: str):
+    try:
+        qdrant = Qdrant(collection_name="sessions")
+        # results = qdrant.get_qdrant().similarity_search_with_relevance_scores(query, k=30, filter=models.Filter(
+        #     must=[
+        #         models.FieldCondition(
+        #             key="metadata.org_id",
+        #             match=models.MatchValue(value=org_id)
+        #         )
+        #     ]
+        # ))
+
+        retriever = qdrant.get_qdrant().as_retriever(search_type="similarity", search_kwargs={"k": 30, "filter": models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="metadata.org_id",
+                    match=models.MatchValue(value=org_id)
+                )
+            ]
+        )})
+
+        # results = retriever.invoke(query)
+
+        # Create Cohere's reranker with the vector DB using Cohere's embeddings as the base retriever
+        reranker = CohereRerank(
+            cohere_api_key=settings.COHERE_API_KEY, model="rerank-v3.5", top_n=30
+        )
+        compression_retriever = ContextualCompressionRetriever(
+            base_compressor=reranker, base_retriever=retriever
+        )
+        results = compression_retriever.invoke(
+            query
+        )
+        # Print the relevant documents from using the embeddings and reranker
+        # print(compressed_docs)
+
+
+        return results
+    except Exception as e:
+        logger.error(f"Error searching knowledge base for org {org_id}: {e}")
+        raise e
+
+

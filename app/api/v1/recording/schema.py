@@ -81,3 +81,6 @@ class RecordingResponse(RecordingCreateForUpload):
         if value is None:
             return None
         return [tag.strip() for tag in value.split(",") if tag.strip()]
+
+class SearchBody(BaseModel):
+    query: str

@@ -1,6 +1,6 @@
 from database import get_db
 from fastapi import APIRouter, Depends, WebSocket
-from requests import Session
+from sqlalchemy.orm import Session
 
 from . import service as ws_service
 

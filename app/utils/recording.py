@@ -661,3 +661,103 @@ def chunk_video(
     
     return []
 
+def extract_frames_per_second(
+    video_path: str,
+    output_dir: str,
+    fps_extract: float = 1.0,
+    image_format: str = "jpg"
+) -> List[Tuple[str, float]]:
+    """
+    Extract frames from a video at a specified rate using FFmpeg.
+    
+    Args:
+        video_path (str): Path to the source video file
+        output_dir (str): Directory to save the extracted frames
+        fps_extract (float): Number of frames to extract per second (default: 1.0)
+        image_format (str): Image format for saved frames (jpg, png, etc.)
+        
+    Returns:
+        List[Tuple[str, float]]: List of tuples containing (frame_path, timestamp) for each extracted frame
+        
+    Raises:
+        ValueError: If the operation fails
+        FileNotFoundError: If the file does not exist
+    """
+    if not os.path.exists(video_path):
+        raise FileNotFoundError(f"Video file not found: {video_path}")
+    
+    # Check if FFmpeg is available
+    if not is_ffmpeg_available():
+        raise RuntimeError(
+            "FFmpeg is not installed or not in PATH. Please install FFmpeg to use this feature.\n"
+            "- macOS: brew install ffmpeg\n"
+            "- Ubuntu/Debian: sudo apt install ffmpeg\n"
+            "- Windows: Download from https://ffmpeg.org/download.html"
+        )
+    
+    # Create output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Extract base filename for naming frames
+    base_name = os.path.basename(video_path)
+    base_filename, _ = os.path.splitext(base_name)
+    
+    try:
+        # Get video duration
+        total_duration = ffmpeg_get_video_duration(video_path)
+        
+        # Create output pattern for frames
+        frame_pattern = os.path.join(output_dir, f"{base_filename}_frame_%06d.{image_format}")
+        
+        # Use FFmpeg to extract frames at the specified rate
+        cmd = [
+            'ffmpeg',
+            '-y',  # Overwrite output files
+            '-i', video_path,
+            '-vf', f'fps={fps_extract}',  # Extract at specified fps
+            '-frame_pts', '1',  # Use presentation timestamp for frame numbering
+            frame_pattern
+        ]
+        
+        print(f"Extracting frames at {fps_extract} fps using FFmpeg...")
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        
+        # Collect information about extracted frames
+        extracted_frames = []
+        frame_index = 1
+        
+        while True:
+            frame_path = os.path.join(output_dir, f"{base_filename}_frame_{frame_index:06d}.{image_format}")
+            if not os.path.exists(frame_path):
+                break
+                
+            # Calculate timestamp based on frame index and extraction rate
+            timestamp = (frame_index - 1) / fps_extract
+            
+            # Rename file to include timestamp
+            minutes = int(timestamp // 60)
+            seconds = timestamp % 60
+            timestamp_str = f"{minutes:02d}m{seconds:06.3f}s"
+            
+            new_frame_filename = f"{base_filename}_frame_{timestamp_str}.{image_format}"
+            new_frame_path = os.path.join(output_dir, new_frame_filename)
+            
+            # Rename the file
+            os.rename(frame_path, new_frame_path)
+            
+            extracted_frames.append((new_frame_path, timestamp))
+            frame_index += 1
+        
+        print(f"Successfully extracted {len(extracted_frames)} frames at {fps_extract} fps")
+        return extracted_frames
+        
+    except subprocess.CalledProcessError as e:
+        error_message = f"FFmpeg error: {e.stderr}"
+        print(error_message)
+        raise ValueError(error_message)
+
+
+# if __name__ == "__main__":
+#     video_path = "/Users/emadelsheshtawy/Perceptr WS/perceptr/recordings/eval1.webm"
+#     extract_frames_per_second(video_path, "/Users/emadelsheshtawy/Perceptr WS/perceptr/recordings/eval1/frames")
+#     print("done")
