@@ -38,6 +38,14 @@ class Settings(BaseSettings):
     RECORDING_INTERVAL_DURATION: int = 30  # 30 seconds chunk size
     SLOW_DOWN_FACTOR: float = 1.0  # 1.0 means no slowdown set it to 2.0 for 2x slowdown
 
+    # Neo4j Knowledge Graph settings
+    NEO4J_URI: str = "bolt://localhost:7687"
+    NEO4J_USER: str = "neo4j"
+    NEO4J_PASSWORD: str = "password"
+    NEO4J_DATABASE: str = "neo4j"
+    # Knowledge Graph settings
+    KG_ENABLED: bool = True
+
     class Config:
         env_file = ".env"
 

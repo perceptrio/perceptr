@@ -3,6 +3,7 @@ from api.v1.chat.router import router as chat_router
 from api.v1.chat_message.router import router as chat_message_router
 from api.v1.email.router import router as email_router
 from api.v1.issue.router import router as issue_router
+from api.v1.kg.router import router as kg_router
 from api.v1.org.router import router as org_router
 from api.v1.per.router import router as per_router
 from api.v1.recording.router import router as recording_router
@@ -36,6 +37,7 @@ app.include_router(email_router)
 app.include_router(chat_router)
 app.include_router(chat_message_router)
 app.include_router(ws_router)
+app.include_router(kg_router)
 # SDK router
 app.include_router(per_router)
 # Add exception handler for unhandled exceptions
