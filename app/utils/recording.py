@@ -1,6 +1,6 @@
 import os
 import cv2
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Optional
 import subprocess
 import shutil
 
@@ -236,8 +236,8 @@ def ffmpeg_slow_down_video(
 def ffmpeg_chunk_video(
     video_path: str, 
     chunk_size_seconds: int = 30,
-    output_dir: str = None,
-    codec: str = None  # Keeping parameter for backward compatibility, but we won't use it
+    output_dir: Optional[str] = None,
+    codec: Optional[str] = None  # Keeping parameter for backward compatibility, but we won't use it
 ) -> List[Tuple[str, float, float]]:
     """
     Split a video into chunks of specified duration using FFmpeg.
@@ -359,10 +359,10 @@ def ffmpeg_chunk_video(
 def ffmpeg_chunk_video_optimized(
     video_path: str, 
     chunk_size_seconds: int = 30,
-    output_dir: str = None,
-    codec: str = None,  # Keeping parameter for backward compatibility, but we won't use it
-    total_duration: float = None,
-    file_ext: str = None
+    output_dir: Optional[str] = None,
+    codec: Optional[str] = None,  # Keeping parameter for backward compatibility, but we won't use it
+    total_duration: Optional[float] = None,
+    file_ext: Optional[str] = None
 ) -> List[Tuple[str, float, float]]:
     """
     Split a video into chunks using FFmpeg's segment feature.
@@ -541,7 +541,7 @@ def slow_down_video(
 def chunk_video(
     video_path: str, 
     chunk_size_seconds: int = 30,
-    output_dir: str = None,
+    output_dir: Optional[str] = None,
     slowdown_factor: float = 1.0
 ) -> List[Tuple[str, float, float]]:
     """
@@ -660,4 +660,121 @@ def chunk_video(
         cap.release()
     
     return []
+
+def seconds_to_hms(seconds: float) -> str:
+    """
+    Convert seconds to HH:MM:SS format.
+    
+    Args:
+        seconds (float): Time in seconds
+        
+    Returns:
+        str: Time formatted as HH:MM:SS
+    """
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+def extract_frames_from_video(
+    video_path: str,
+    fps: float,
+    output_dir: Optional[str] = None,
+    image_format: str = "png"
+) -> List[Tuple[str, str]]:
+    """
+    Extract frames from a video at specified fps.
+    
+    Args:
+        video_path (str): Path to the source video file
+        fps (float): Frames per second to extract (e.g., 1.0 for 1 frame per second)
+        output_dir (str, optional): Directory to save frames. If None, uses the directory of the source video.
+        image_format (str): Image format for extracted frames (jpg, png, etc.)
+        
+    Returns:
+        List[Tuple[str, str]]: List of tuples containing (frame_path, timestamp_hms) for each extracted frame
+        
+    Raises:
+        ValueError: If the video file cannot be opened
+        FileNotFoundError: If the file does not exist
+    """
+    if not os.path.exists(video_path):
+        raise FileNotFoundError(f"Video file not found: {video_path}")
+    
+    # Get or create output directory
+    if output_dir is None:
+        output_dir = os.path.dirname(video_path)
+    
+    # Create output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Extract base filename for naming frames
+    base_name = os.path.basename(video_path)
+    base_filename, _ = os.path.splitext(base_name)
+    
+    # Validate image format
+    image_format = image_format.lower().lstrip('.')
+    if image_format not in ['jpg', 'jpeg', 'png', 'bmp', 'tiff']:
+        raise ValueError(f"Unsupported image format: {image_format}")
+    
+    # Open the video file
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise ValueError(f"Could not open video file: {video_path}")
+    
+    try:
+        # Get video properties
+        video_fps = cap.get(cv2.CAP_PROP_FPS)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        total_duration = total_frames / video_fps if video_fps > 0 else 0
+        
+        # Calculate frame interval for extraction
+        if fps <= 0:
+            raise ValueError("FPS must be greater than 0")
+        
+        frame_interval = video_fps / fps  # How many video frames to skip between extractions
+        
+        extracted_frames = []
+        current_frame = 0
+        frame_count = 0
+        
+        print(f"Extracting frames at {fps} fps from video with {video_fps} fps...")
+        
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            
+            # Check if we should extract this frame
+            if current_frame >= frame_count * frame_interval:
+                # Calculate timestamp for this frame
+                timestamp_seconds = current_frame / video_fps
+                timestamp_hms = seconds_to_hms(timestamp_seconds)
+                
+                # Create frame filename
+                frame_filename = f"{base_filename}_frame_{frame_count:06d}_t{timestamp_hms.replace(':', '-')}.{image_format}"
+                frame_path = os.path.join(output_dir, frame_filename)
+                
+                # Save the frame
+                success = cv2.imwrite(frame_path, frame)
+                if not success:
+                    print(f"Warning: Failed to save frame at {frame_path}")
+                    continue
+                
+                # Add to extracted frames list
+                extracted_frames.append((frame_path, timestamp_hms))
+                frame_count += 1
+                
+                # Print progress
+                if frame_count % 10 == 0:
+                    progress = (current_frame / total_frames) * 100
+                    print(f"Extracted {frame_count} frames ({progress:.1f}% complete)")
+            
+            current_frame += 1
+        
+        print(f"Successfully extracted {len(extracted_frames)} frames to {output_dir}")
+        return extracted_frames
+        
+    finally:
+        cap.release()
 
