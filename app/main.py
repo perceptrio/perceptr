@@ -7,7 +7,7 @@ from api.v1.org.router import router as org_router
 from api.v1.per.router import router as per_router
 from api.v1.recording.router import router as recording_router
 from api.v1.recording_intervals.router import router as recording_interval_router
-from api.v1.ux.router import router as ux_router
+from api.v1.uxaudit.router import router as ux_router
 from api.v1.ws.router import router as ws_router
 from common.middleware.app_start import lifespan
 from common.middleware.request_logger import RequestLoggerMiddleware

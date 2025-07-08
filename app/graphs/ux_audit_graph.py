@@ -1,16 +1,15 @@
+import base64
 import os
-import time
 from typing import Any, Dict, List
 
 from common.services.logger import logger
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langfuse.decorators import langfuse_context, observe
 from langgraph.graph import END, START, StateGraph
 from settings import settings
 from typing_extensions import TypedDict
-from langchain_google_genai import ChatGoogleGenerativeAI
-import base64
 
 os.environ["LANGFUSE_PUBLIC_KEY"] = settings.LANGFUSE_PUBLIC_KEY
 os.environ["LANGFUSE_SECRET_KEY"] = settings.LANGFUSE_PRIVATE_KEY
@@ -19,9 +18,7 @@ from pydantic import BaseModel, Field
 
 
 class Issue(BaseModel):
-    issue_title: str = Field(
-        description="A title of the issue found in the screen."
-    )
+    issue_title: str = Field(description="A title of the issue found in the screen.")
     issue: str = Field(
         description="A detailed description of the issue found in the screen."
     )
@@ -29,19 +26,15 @@ class Issue(BaseModel):
         description="A detailed recommendation for improvement."
     )
 
+
 class UXAudit(BaseModel):
     short_title: str = Field(
         description="A short title for the screen. It should be a single sentence that captures the main idea of the screen."
     )
 
-    summary: str = Field(
-        description="A summary of the UX audit of the screen."
-    )
+    summary: str = Field(description="A summary of the UX audit of the screen.")
 
-    issues: List[Issue] = Field(
-        description="A list of issues found in the screen."
-    )
-    
+    issues: List[Issue] = Field(description="A list of issues found in the screen.")
 
 
 class State(TypedDict):
@@ -66,8 +59,6 @@ class UXAuditGraph:
     def ux_audit(self, state: State, config: RunnableConfig) -> dict:
         frame_path = state["frame_path"]
 
-
-
         prompt = """You are an expert UI/UX Auditor.
         You are given a screen of a web application, or a mobile app, or a desktop app.
         You are to audit the UX of the screen and provide a summary of the UX.
@@ -79,24 +70,23 @@ class UXAuditGraph:
             encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
 
         message = HumanMessage(
-    content=[
-        {"type": "text", "text": "Audit the UX of the screen:"},
-        {"type": "image_url", "image_url": f"data:image/png;base64,{encoded_string}"},
-    ],
-)
+            content=[
+                {"type": "text", "text": "Audit the UX of the screen:"},
+                {
+                    "type": "image_url",
+                    "image_url": f"data:image/png;base64,{encoded_string}",
+                },
+            ],
+        )
 
         messages = [
             SystemMessage(content=prompt),
             message,
         ]
 
-        response = self.gemini_llm.with_structured_output(UXAudit).invoke(
-            messages
-        )
-
+        response = self.gemini_llm.with_structured_output(UXAudit).invoke(messages)
 
         return {"ux_audit_report": response}
-
 
     @observe()  # type: ignore[misc]
     def audit_ux(
