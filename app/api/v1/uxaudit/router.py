@@ -88,15 +88,13 @@ def audit_video_ux_sync(
     Returns when the audit is complete with the PDF path.
     """
     try:
-        logger.info(f"Starting synchronous UX audit for {request.file_name}")
+        logger.info(f"Starting synchronous UX audit for {request.key}")
 
         # Perform the audit synchronously
-        pdf_path, frames_analyzed = service.audit_video_ux(
-            request.email, request.file_name
-        )
+        pdf_path, frames_analyzed = service.audit_video_ux(request.email, request.key)
 
         return UXAuditSyncResponse(
-            message=f"UX audit completed for file {request.file_name}",
+            message=f"UX audit completed for file {request.key}",
             pdf_path=pdf_path,
             frames_analyzed=frames_analyzed,
             success=True,

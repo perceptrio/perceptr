@@ -4,11 +4,11 @@ from pydantic import BaseModel, EmailStr
 
 
 class LeadUXAuditRequest(BaseModel):
-    email: str
+    email: EmailStr
 
 
 class UXAuditRequest(BaseModel):
-    email: str
+    email: EmailStr
     key: str
 
 

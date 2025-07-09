@@ -98,7 +98,7 @@ async def send_ux_audit_result_email(user_email: str, pdf_content: bytes):
                     status_code=500, detail=f"Failed to send email: {str(e)}"
                 )
     except Exception as e:
-        logger.error(f"Error auditing lead UX: {e}")
+        logger.error(f"Error sending UX audit result email", exc_info=e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -108,7 +108,7 @@ def audit_video_ux(user_email: str, key: str) -> Tuple[str, int]:
 
     Args:
         user_email (str): Email of the user requesting the audit
-        file_name (str): Name of the video file to audit (e.g., "1/Mylo 1 trim/original.mp")
+        key (str): S3 key of the video file to audit (e.g., "1/Mylo 1 trim/original.mp")
 
     Returns:
         Tuple[str, int]: S3 path to the generated PDF report and number of frames analyzed
