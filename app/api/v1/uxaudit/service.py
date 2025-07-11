@@ -47,8 +47,11 @@ async def send_lead_ux_audit_email(email: str):
             )
             response.raise_for_status()
             return GenericResponse(message="Email sent successfully", success=True)
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Error sending email: {e}")
+            raise HTTPException(status_code=400, detail="Failed to send email")
         except httpx.HTTPError as e:
-            logger.error(f"Error sending email", exc_info=e)
+            logger.error(f"Error sending email: {e}")
             raise HTTPException(status_code=400, detail="Failed to send email")
 
 
@@ -93,16 +96,22 @@ async def send_ux_audit_result_email(user_email: str, pdf_content: bytes):
                 )
                 response.raise_for_status()
                 return GenericResponse(message="Email sent successfully", success=True)
+            except httpx.HTTPStatusError as e:
+                logger.error(f"Error sending UX audit result email: {e}")
+                raise HTTPException(
+                    status_code=500, detail=f"Failed to send email: {str(e)}"
+                )
             except httpx.HTTPError as e:
+                logger.error(f"Error sending UX audit result email: {e}")
                 raise HTTPException(
                     status_code=500, detail=f"Failed to send email: {str(e)}"
                 )
     except Exception as e:
-        logger.error(f"Error sending UX audit result email", exc_info=e)
+        logger.error(f"Error sending UX audit result email: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-def audit_video_ux(user_email: str, key: str) -> Tuple[str, int]:
+async def audit_video_ux(user_email: str, key: str) -> Tuple[str, int]:
     """
     Audit the UX of a video by extracting frames and generating a comprehensive PDF report.
 
@@ -139,7 +148,8 @@ def audit_video_ux(user_email: str, key: str) -> Tuple[str, int]:
         audit_data: List[Tuple[str, str, UXAudit]] = []
 
         # Process each frame (limit to first 3 for performance)
-        max_frames = min(20, len(frames))
+        # max_frames = min(2, len(frames))
+        max_frames = len(frames)
         logger.info(f"Processing {max_frames} frames for UX audit...")
 
         for i, frame in enumerate(frames[:max_frames]):
@@ -254,7 +264,7 @@ def audit_video_ux(user_email: str, key: str) -> Tuple[str, int]:
             logger.info(f"PDF size: {len(pdf_content)} bytes")
 
             # Send email with PDF
-            send_ux_audit_result_email(user_email, pdf_content)
+            await send_ux_audit_result_email(user_email, pdf_content)
 
             return s3_pdf_path, len(audit_data)
 

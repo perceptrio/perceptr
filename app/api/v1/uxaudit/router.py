@@ -27,12 +27,12 @@ _rate_limit = {
 _rate_limit_lock = Lock()
 
 
-def _audit_video_ux_background_task(user_email: str, file_name: str):
+async def _audit_video_ux_background_task(user_email: str, file_name: str):
     """
     Background task wrapper for audit_video_ux to handle the tuple return value.
     """
     try:
-        pdf_path, frames_analyzed = service.audit_video_ux(user_email, file_name)
+        pdf_path, frames_analyzed = await service.audit_video_ux(user_email, file_name)
         logger.info(
             f"Background UX audit completed. PDF: {pdf_path}, Frames: {frames_analyzed}"
         )
@@ -80,7 +80,7 @@ def audit_video_ux(
 
 
 @router.post("/audit/sync", response_model=UXAuditSyncResponse)
-def audit_video_ux_sync(
+async def audit_video_ux_sync(
     request: UXAuditRequest,
 ):
     """
@@ -91,7 +91,7 @@ def audit_video_ux_sync(
         logger.info(f"Starting synchronous UX audit for {request.key}")
 
         # Perform the audit synchronously
-        pdf_path, frames_analyzed = service.audit_video_ux(request.email, request.key)
+        pdf_path, frames_analyzed = await service.audit_video_ux(request.email, request.key)
 
         return UXAuditSyncResponse(
             message=f"UX audit completed for file {request.key}",
