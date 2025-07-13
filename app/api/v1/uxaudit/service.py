@@ -66,7 +66,7 @@ async def send_ux_audit_result_email(user_email: str, pdf_url: str):
             )
 
         # Prepare the email parameters
-        params = {"email": user_email}
+        params = {"email": user_email, "pdfLink": pdf_url}
 
         # Prepare the email payload
         payload = {
@@ -74,12 +74,6 @@ async def send_ux_audit_result_email(user_email: str, pdf_url: str):
             "bcc": [{"email": "emadmohamed95@gmail.com"}],
             "to": [{"email": user_email}],
             "params": params,
-            "attachment": [
-                {
-                    "url": pdf_url,
-                    "name": "perceptr_ux_audit_report.pdf",
-                },
-            ],
         }
 
         async with httpx.AsyncClient() as client:
