@@ -7,6 +7,7 @@ from api.v1.org.router import router as org_router
 from api.v1.per.router import router as per_router
 from api.v1.recording.router import router as recording_router
 from api.v1.recording_intervals.router import router as recording_interval_router
+from api.v1.uxaudit.router import router as ux_router
 from api.v1.ws.router import router as ws_router
 from common.middleware.app_start import lifespan
 from common.middleware.request_logger import RequestLoggerMiddleware
@@ -35,6 +36,7 @@ app.include_router(analytics_router)
 app.include_router(email_router)
 app.include_router(chat_router)
 app.include_router(chat_message_router)
+app.include_router(ux_router)
 app.include_router(ws_router)
 # SDK router
 app.include_router(per_router)
