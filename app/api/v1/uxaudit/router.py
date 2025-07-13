@@ -1,3 +1,4 @@
+import concurrent.futures
 from datetime import UTC, datetime, timedelta
 from threading import Lock
 
@@ -27,15 +28,27 @@ _rate_limit = {
 _rate_limit_lock = Lock()
 
 
-async def _audit_video_ux_background_task(user_email: str, file_name: str):
+def _audit_video_ux_thread(user_email, file_name):
+    import asyncio
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    result = loop.run_until_complete(service.audit_video_ux(user_email, file_name))
+    loop.close()
+    return result
+
+
+def _audit_video_ux_background_task(user_email: str, file_name: str):
     """
-    Background task wrapper for audit_video_ux to handle the tuple return value.
+    Run the audit_video_ux function in a separate process to avoid blocking the main thread.
     """
     try:
-        pdf_path, frames_analyzed = await service.audit_video_ux(user_email, file_name)
-        logger.info(
-            f"Background UX audit completed. PDF: {pdf_path}, Frames: {frames_analyzed}"
-        )
+        with concurrent.futures.ProcessPoolExecutor() as executor:
+            future = executor.submit(_audit_video_ux_thread, user_email, file_name)
+            pdf_path, frames_analyzed = future.result()
+            logger.info(
+                f"Background UX audit completed. PDF: {pdf_path}, Frames: {frames_analyzed}"
+            )
     except Exception as e:
         logger.error(f"Error in background UX audit task: {e}")
 
@@ -91,7 +104,9 @@ async def audit_video_ux_sync(
         logger.info(f"Starting synchronous UX audit for {request.key}")
 
         # Perform the audit synchronously
-        pdf_path, frames_analyzed = await service.audit_video_ux(request.email, request.key)
+        pdf_path, frames_analyzed = await service.audit_video_ux(
+            request.email, request.key
+        )
 
         return UXAuditSyncResponse(
             message=f"UX audit completed for file {request.key}",

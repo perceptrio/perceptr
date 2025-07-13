@@ -53,6 +53,4 @@ async def send_contact_email(request: EmailRequest):  # type: ignore
             response.raise_for_status()
             return {"message": "Email sent successfully"}
         except httpx.HTTPError as e:
-            raise HTTPException(
-                status_code=500, detail=f"Failed to send email: {str(e)}"
-            )
+            raise HTTPException(status_code=500, detail=f"Failed to send email")

@@ -23,7 +23,6 @@ async def send_lead_ux_audit_email(email: str):
         raise HTTPException(
             status_code=500, detail="Email service configuration is missing"
         )
-
     # Prepare the email parameters
     params = {"email": email}
     payload = {
@@ -48,16 +47,16 @@ async def send_lead_ux_audit_email(email: str):
             response.raise_for_status()
             return GenericResponse(message="Email sent successfully", success=True)
         except httpx.HTTPStatusError as e:
-            logger.error(f"Error sending email: {e}")
+            logger.error(f"Error sending email", exc_info=e)
             raise HTTPException(status_code=400, detail="Failed to send email")
         except httpx.HTTPError as e:
-            logger.error(f"Error sending email: {e}")
+            logger.error(f"Error sending email", exc_info=e)
             raise HTTPException(status_code=400, detail="Failed to send email")
 
 
-async def send_ux_audit_result_email(user_email: str, pdf_content: bytes):
+async def send_ux_audit_result_email(user_email: str, pdf_url: str):
     """
-    Send a UX audit result email to the user.
+    Send a UX audit result email to the user with a public PDF URL.
     """
     try:
         brevo_api_key = settings.BREVO_API_KEY
@@ -77,7 +76,7 @@ async def send_ux_audit_result_email(user_email: str, pdf_content: bytes):
             "params": params,
             "attachment": [
                 {
-                    "content": base64.b64encode(pdf_content).decode(),
+                    "url": pdf_url,
                     "name": "perceptr_ux_audit_report.pdf",
                 },
             ],
@@ -95,20 +94,21 @@ async def send_ux_audit_result_email(user_email: str, pdf_content: bytes):
                     },
                 )
                 response.raise_for_status()
-                return GenericResponse(message="Email sent successfully", success=True)
+                logger.info(f"Audit result email sent successfully")
             except httpx.HTTPStatusError as e:
-                logger.error(f"Error sending UX audit result email: {e}")
-                raise HTTPException(
-                    status_code=500, detail=f"Failed to send email: {str(e)}"
+                logger.error(
+                    f"Error sending UX audit result email due to status error",
+                    exc_info=e,
                 )
+                raise HTTPException(status_code=500, detail=f"Failed to send email")
             except httpx.HTTPError as e:
-                logger.error(f"Error sending UX audit result email: {e}")
-                raise HTTPException(
-                    status_code=500, detail=f"Failed to send email: {str(e)}"
+                logger.error(
+                    f"Error sending UX audit result email due to HTTP error", exc_info=e
                 )
+                raise HTTPException(status_code=500, detail=f"Failed to send email")
     except Exception as e:
-        logger.error(f"Error sending UX audit result email: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error sending UX audit result email", exc_info=e)
+        raise HTTPException(status_code=500, detail=f"Failed to send email")
 
 
 async def audit_video_ux(user_email: str, key: str) -> Tuple[str, int]:
@@ -174,13 +174,14 @@ async def audit_video_ux(user_email: str, key: str) -> Tuple[str, int]:
                 audit_data.append((frame_path, frame_timestamp, ux_audit_report))
 
                 # Log the audit response
-                logger.info(f"UX audit response for frame {i+1}:")
-                logger.info(f"  - Title: {ux_audit_report.short_title}")
-                logger.info(f"  - Summary: {ux_audit_report.summary}")
-                logger.info(f"  - Issues found: {len(ux_audit_report.issues)}")
-                for idx, issue in enumerate(ux_audit_report.issues, 1):
-                    logger.info(f"    {idx}. {issue.issue_title}: {issue.issue}")
-                logger.info("================================================")
+                if settings.LOG_STYLE == "line":
+                    logger.info(f"UX audit response for frame {i+1}:")
+                    logger.info(f"  - Title: {ux_audit_report.short_title}")
+                    logger.info(f"  - Summary: {ux_audit_report.summary}")
+                    logger.info(f"  - Issues found: {len(ux_audit_report.issues)}")
+                    for idx, issue in enumerate(ux_audit_report.issues, 1):
+                        logger.info(f"    {idx}. {issue.issue_title}: {issue.issue}")
+                    logger.info("================================================")
 
             except Exception as e:
                 logger.error(f"Error processing frame {i+1} at {frame_timestamp}: {e}")
@@ -263,8 +264,11 @@ async def audit_video_ux(user_email: str, key: str) -> Tuple[str, int]:
             logger.info(f"PDF uploaded to S3 successfully: {s3_pdf_path}")
             logger.info(f"PDF size: {len(pdf_content)} bytes")
 
-            # Send email with PDF
-            await send_ux_audit_result_email(user_email, pdf_content)
+            # Generate public URL
+            pdf_url = s3_service.get_public_url(s3_pdf_path)
+
+            # Send email with PDF URL
+            await send_ux_audit_result_email(user_email, pdf_url)
 
             return s3_pdf_path, len(audit_data)
 

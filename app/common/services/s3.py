@@ -79,7 +79,6 @@ class S3Service:
             )
 
         extra_args = {"ContentType": content_type}
-        print(extra_args)
         return self.generate_presigned_url(
             file_path, "put_object", expiration, extra_args
         )
@@ -122,6 +121,10 @@ class S3Service:
     def upload_file(self, file_path: str, content: bytes) -> None:
         """Upload a file to S3."""
         self.s3_client.put_object(Bucket=self.bucket_name, Key=file_path, Body=content)
+
+    def get_public_url(self, file_path: str) -> str:
+        """Get the public URL for a file in S3 (if public-read)."""
+        return f"https://{self.bucket_name}.s3.{settings.AWS_REGION}.amazonaws.com/{file_path}"
 
     def list_folder_contents(
         self, folder_path: str, recursive: bool = True
