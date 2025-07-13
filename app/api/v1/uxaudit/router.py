@@ -1,4 +1,3 @@
-import concurrent.futures
 from datetime import UTC, datetime, timedelta
 from threading import Lock
 
@@ -22,35 +21,11 @@ router = APIRouter(prefix=f"{APIPath.V1}/uxaudit", tags=["uxaudit"])
 
 # In-memory rate limit store and lock
 _rate_limit = {
+    "lead": {},
     "upload": {},
     "audit": {},
 }
 _rate_limit_lock = Lock()
-
-
-def _audit_video_ux_thread(user_email, file_name):
-    import asyncio
-
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    result = loop.run_until_complete(service.audit_video_ux(user_email, file_name))
-    loop.close()
-    return result
-
-
-def _audit_video_ux_background_task(user_email: str, file_name: str):
-    """
-    Run the audit_video_ux function in a separate process to avoid blocking the main thread.
-    """
-    try:
-        with concurrent.futures.ProcessPoolExecutor() as executor:
-            future = executor.submit(_audit_video_ux_thread, user_email, file_name)
-            pdf_path, frames_analyzed = future.result()
-            logger.info(
-                f"Background UX audit completed. PDF: {pdf_path}, Frames: {frames_analyzed}"
-            )
-    except Exception as e:
-        logger.error(f"Error in background UX audit task: {e}")
 
 
 @router.post("/lead", response_model=GenericResponse)
@@ -58,6 +33,14 @@ async def audit_lead_ux(request: LeadUXAuditRequest):
     """
     Audit the UX of a lead.
     """
+    now = datetime.now(UTC)
+    with _rate_limit_lock:
+        last_lead = _rate_limit["lead"].get(request.email)
+        if last_lead and now - last_lead < timedelta(hours=6):
+            raise HTTPException(
+                status_code=429, detail="You can only audit once every 6 hours."
+            )
+        _rate_limit["lead"][request.email] = now
     return await service.send_lead_ux_audit_email(request.email)
 
 
@@ -82,13 +65,18 @@ def audit_video_ux(
 
     try:
         background_tasks.add_task(
-            _audit_video_ux_background_task, request.email, request.key
+            service.audit_video_ux_background_task, request.email, request.key
         )
         return UXAuditResponse(
             message=f"UX audit started for file {request.key}", success=True
         )
     except Exception as e:
-        logger.error(f"Error starting UX audit: {e}")
+        logger.error(
+            "Error starting UX audit",
+            exc_info=e,
+            user_email=request.email,
+            file_name=request.key,
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -115,7 +103,12 @@ async def audit_video_ux_sync(
             success=True,
         )
     except Exception as e:
-        logger.error(f"Error performing synchronous UX audit: {e}")
+        logger.error(
+            "Error performing synchronous UX audit",
+            exc_info=e,
+            user_email=request.email,
+            file_name=request.key,
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -148,5 +141,10 @@ def upload_uxaudit_file(request: UploadRequest):
             success=True,
         )
     except Exception as e:
-        logger.error(f"Error generating presigned upload URL: {e}")
+        logger.error(
+            "Error generating presigned upload URL",
+            exc_info=e,
+            email=request.email,
+            file_name=request.fileName,
+        )
         raise HTTPException(status_code=500, detail="Could not generate upload URL.")

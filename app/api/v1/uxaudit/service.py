@@ -1,4 +1,4 @@
-import base64
+import concurrent.futures
 import os
 from typing import List, Tuple
 
@@ -12,6 +12,38 @@ from graphs.ux_audit_graph import Issue, UXAudit, UXAuditGraph
 from settings import settings
 from utils.recording import extract_frames_from_video
 from utils.structured_ux_pdf_generator import StructuredUXAuditPDFGenerator
+
+
+def _audit_video_ux_thread(user_email, file_name):
+    import asyncio
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    result = loop.run_until_complete(audit_video_ux(user_email, file_name))
+    loop.close()
+    return result
+
+
+def audit_video_ux_background_task(user_email: str, file_name: str):
+    """
+    Run the audit_video_ux function in a separate process to avoid blocking the main thread.
+    """
+    try:
+        with concurrent.futures.ProcessPoolExecutor() as executor:
+            future = executor.submit(_audit_video_ux_thread, user_email, file_name)
+            pdf_path, frames_analyzed = future.result()
+            logger.info(
+                "Background UX audit completed",
+                pdf_path=pdf_path,
+                frames_analyzed=frames_analyzed,
+            )
+    except Exception as e:
+        logger.error(
+            "Error in background UX audit task",
+            exc_info=e,
+            user_email=user_email,
+            file_name=file_name,
+        )
 
 
 async def send_lead_ux_audit_email(email: str):
@@ -119,13 +151,14 @@ async def audit_video_ux(user_email: str, key: str) -> Tuple[str, int]:
     logger.info(f"Starting UX audit for video: {key} (user: {user_email})")
 
     # Log the file path components for debugging
-    logger.info(f"File path analysis:")
-    logger.info(f"  - Original file_name: {key}")
-    logger.info(f"  - Directory: {os.path.dirname(key)}")
-    logger.info(f"  - Basename: {os.path.basename(key)}")
-    logger.info(
-        f"  - Name without extension: {os.path.splitext(os.path.basename(key))[0]}"
-    )
+    if settings.LOG_STYLE == "line":
+        logger.info(f"File path analysis:")
+        logger.info(f"  - Original file_name: {key}")
+        logger.info(f"  - Directory: {os.path.dirname(key)}")
+        logger.info(f"  - Basename: {os.path.basename(key)}")
+        logger.info(
+            f"  - Name without extension: {os.path.splitext(os.path.basename(key))[0]}"
+        )
 
     with FilesDownloader(s3_service.get_s3_client(), keep_temp_dir=False) as downloader:
         # Download the video file
@@ -135,7 +168,6 @@ async def audit_video_ux(user_email: str, key: str) -> Tuple[str, int]:
         output_dir = os.path.join(os.path.dirname(file_path), "frames")
 
         # Extract frames from the video
-        logger.info("Extracting frames from video...")
         frames = extract_frames_from_video(file_path, 1, output_dir)
 
         # Collect structured audit data for all frames
@@ -144,14 +176,17 @@ async def audit_video_ux(user_email: str, key: str) -> Tuple[str, int]:
         # Process each frame (limit to first 3 for performance)
         # max_frames = min(2, len(frames))
         max_frames = len(frames)
-        logger.info(f"Processing {max_frames} frames for UX audit...")
+        logger.info(f"Processing frames for UX audit...", frames=frames)
 
         for i, frame in enumerate(frames[:max_frames]):
             frame_path = frame[0]
             frame_timestamp = frame[1]
 
             logger.info(
-                f"Processing frame {i+1}/{max_frames} at timestamp {frame_timestamp}"
+                "Processing frame",
+                frame_index=i + 1,
+                max_frames=max_frames,
+                frame_timestamp=frame_timestamp,
             )
 
             try:
@@ -178,7 +213,12 @@ async def audit_video_ux(user_email: str, key: str) -> Tuple[str, int]:
                     logger.info("================================================")
 
             except Exception as e:
-                logger.error(f"Error processing frame {i+1} at {frame_timestamp}: {e}")
+                logger.error(
+                    "Error processing frame",
+                    frame_index=i + 1,
+                    frame_timestamp=frame_timestamp,
+                    exc_info=e,
+                )
                 # Create a fallback UXAudit object for errors
                 error_audit = UXAudit(
                     short_title="Error Processing Screen",
@@ -209,8 +249,6 @@ async def audit_video_ux(user_email: str, key: str) -> Tuple[str, int]:
         safe_video_name = video_name_no_ext.replace(" ", "_").replace("/", "_")
         pdf_filename = f"ux_audit_report_{safe_video_name}.pdf"
 
-        logger.info(f"Generated PDF filename: {pdf_filename}")
-
         try:
             # Use the new structured PDF generator
             pdf_generator = StructuredUXAuditPDFGenerator()
@@ -220,18 +258,12 @@ async def audit_video_ux(user_email: str, key: str) -> Tuple[str, int]:
                 filename=pdf_filename,
             )
 
-            logger.info(
-                f"PDF generated successfully with structured ReportLab generator: {pdf_path}"
-            )
-
         except Exception as e:
-            logger.error(f"Error generating PDF with structured generator: {e}")
-            raise Exception(f"PDF generation failed: {e}")
-
-        logger.info(f"PDF report generated successfully: {pdf_path}")
+            logger.error("Error generating PDF with structured generator", exc_info=e)
+            raise Exception("PDF generation failed")
 
         # Upload PDF to S3 in the same location as the video file
-        logger.info("Uploading PDF to S3...")
+        logger.info("Uploading PDF to S3", pdf_path=pdf_path)
 
         # Extract directory path from video file name
         # For file_name like "1/Mylo 1 trim/original.mp", this will be "1/Mylo 1 trim"
@@ -245,8 +277,6 @@ async def audit_video_ux(user_email: str, key: str) -> Tuple[str, int]:
             # If video is in root, put PDF in root
             s3_pdf_path = pdf_filename
 
-        logger.info(f"S3 PDF path will be: {s3_pdf_path}")
-
         try:
             # Read the PDF file content
             with open(pdf_path, "rb") as pdf_file:
@@ -254,9 +284,6 @@ async def audit_video_ux(user_email: str, key: str) -> Tuple[str, int]:
 
             # Upload to S3
             s3_service.upload_file(s3_pdf_path, pdf_content)
-
-            logger.info(f"PDF uploaded to S3 successfully: {s3_pdf_path}")
-            logger.info(f"PDF size: {len(pdf_content)} bytes")
 
             # Generate public URL
             pdf_url = s3_service.get_public_url(s3_pdf_path)
@@ -267,7 +294,11 @@ async def audit_video_ux(user_email: str, key: str) -> Tuple[str, int]:
             return s3_pdf_path, len(audit_data)
 
         except Exception as e:
-            logger.error(f"Error uploading PDF to S3: {e}")
+            logger.error(
+                "Error uploading PDF to S3 Falling back to local path",
+                exc_info=e,
+                pdf_path=pdf_path,
+                s3_pdf_path=s3_pdf_path,
+            )
             # Return local path as fallback
-            logger.warning(f"Falling back to local path: {pdf_path}")
             return pdf_path, len(audit_data)
