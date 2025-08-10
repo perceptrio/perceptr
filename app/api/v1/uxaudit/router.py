@@ -9,6 +9,7 @@ from core.constants import APIPath
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
 from .schema import (
+    LeadAIEngineerRequest,
     LeadUXAuditRequest,
     UploadRequest,
     UploadResponse,
@@ -26,6 +27,14 @@ _rate_limit = {
     "audit": {},
 }
 _rate_limit_lock = Lock()
+
+
+@router.post("/leadailead", response_model=GenericResponse)
+async def audit_lead_ai_engineer(request: LeadAIEngineerRequest):
+    """
+    Audit the AI engineer of a lead.
+    """
+    return await service.send_lead_ai_engineer_email(request)
 
 
 @router.post("/lead", response_model=GenericResponse)

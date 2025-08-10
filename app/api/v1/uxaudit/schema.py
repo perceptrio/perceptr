@@ -1,6 +1,14 @@
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, EmailStr
+
+
+class LeadAIEngineerRequest(BaseModel):
+    email: EmailStr
+    role: str
+    companySize: str
+    useCases: List[str]
+    utm: dict
 
 
 class LeadUXAuditRequest(BaseModel):

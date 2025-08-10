@@ -1,9 +1,11 @@
 import concurrent.futures
+import json
 import os
 from typing import List, Tuple
 
 import httpx
 from api.v1.per.schema import GenericResponse
+from api.v1.uxaudit.schema import LeadAIEngineerRequest
 from common.services.files_downloader import FilesDownloader
 from common.services.logger import logger
 from common.services.s3 import s3_service
@@ -44,6 +46,84 @@ def audit_video_ux_background_task(user_email: str, file_name: str):
             user_email=user_email,
             file_name=file_name,
         )
+
+
+async def send_lead_ai_engineer_email(request: LeadAIEngineerRequest):
+    """
+    Send a lead AI engineer email to the user.
+    """
+    brevo_api_key = settings.BREVO_API_KEY
+    if not brevo_api_key:
+        raise HTTPException(
+            status_code=500, detail="Email service configuration is missing"
+        )
+    # Prepare the email parameters
+    params = {
+        "email": request.email,
+        "role": request.role,
+        "companySize": request.companySize,
+        "useCases": json.dumps(request.useCases),
+        "utm": request.utm,
+    }
+    payload = {
+        "templateId": 4,
+        "cc": [{"email": "emadmohamed95@gmail.com"}],
+        "to": [{"email": "bebofit@aucegypt.edu"}],
+        "params": params,
+    }
+    lead_payload = {
+        "templateId": 5,
+        "bcc": [
+            {"email": "emadmohamed95@gmail.com"},
+            {"email": "bebofit@aucegypt.edu"},
+        ],
+        "to": [{"email": request.email}],
+    }
+    save_contact_payload = {
+        "email": request.email,
+        "updateEnabled": True,
+        "listIds": [2],
+    }
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(
+                "https://api.brevo.com/v3/smtp/email",
+                json=payload,
+                headers={
+                    "accept": "application/json",
+                    "api-key": brevo_api_key,
+                    "content-type": "application/json",
+                },
+            )
+            response.raise_for_status()
+            lead_response = await client.post(
+                "https://api.brevo.com/v3/smtp/email",
+                json=lead_payload,
+                headers={
+                    "accept": "application/json",
+                    "api-key": brevo_api_key,
+                    "content-type": "application/json",
+                },
+            )
+            lead_response.raise_for_status()
+            save_contact_response = await client.post(
+                "https://api.brevo.com/v3/contacts",
+                json=save_contact_payload,
+                headers={
+                    "accept": "application/json",
+                    "api-key": brevo_api_key,
+                    "content-type": "application/json",
+                },
+            )
+            save_contact_response.raise_for_status()
+            return GenericResponse(message="Email sent successfully", success=True)
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Error sending email", exc_info=e)
+            raise HTTPException(status_code=400, detail="Failed to send email")
+        except httpx.HTTPError as e:
+            logger.error(f"Error sending email", exc_info=e)
+            raise HTTPException(status_code=400, detail="Failed to send email")
 
 
 async def send_lead_ux_audit_email(email: str):
