@@ -3,8 +3,9 @@ name: CI/CD Pipeline
 on:
   push:
     branches:
-      - dev
-      - main
+      # TODO: Uncomment these branches when they are ready
+      # - dev
+      # - main
       - stg
 
 env:
