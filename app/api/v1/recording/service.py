@@ -381,7 +381,6 @@ def process_issues(
             )
 
 
-@post_analysis_process()
 def analyze_recording(org_id: int, recording_id: int) -> None:
     """Analyze a recording - creates its own DB session to avoid stale sessions"""
     from database import SessionLocal
