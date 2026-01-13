@@ -12,26 +12,28 @@ from fastapi import FastAPI
 async def process_stale_sessions_once():
     """
     On startup, check for stale recordings and process them once.
+    Also sets up periodic polling for stale sessions.
     """
     db = SessionLocal()
     try:
         stale_recordings = get_stale_sessions(db)
         logger.info(
-            "Processing stale recordings",
+            "Processing stale recordings on startup",
             stale_recordings=len(stale_recordings),
         )
         for recording in stale_recordings:
-            # _process_session_background is a sync function, so run in threadpool
+            # _process_session_background creates its own DB session, so don't pass db
             logger.info(
                 "Processing stale recording",
                 recording=recording.id,
+                session_id=recording.session_id,
             )
             await asyncio.get_event_loop().run_in_executor(
                 None,
                 _process_session_background,
-                db,
                 recording.org_id,
                 recording.session_id,
+                False,  # force=False
             )
     except Exception as e:
         logger.error(
@@ -40,6 +42,53 @@ async def process_stale_sessions_once():
         )
     finally:
         db.close()
+
+    # Set up periodic polling for stale sessions every 5 minutes
+    async def periodic_stale_check():
+        """Periodically check for stale sessions"""
+        while True:
+            try:
+                await asyncio.sleep(300)  # Check every 5 minutes
+                db = SessionLocal()
+                try:
+                    stale_recordings = get_stale_sessions(db)
+                    if stale_recordings:
+                        logger.info(
+                            "Found stale recordings in periodic check",
+                            count=len(stale_recordings),
+                        )
+                        for recording in stale_recordings:
+                            logger.info(
+                                "Processing stale recording from periodic check",
+                                recording=recording.id,
+                                session_id=recording.session_id,
+                            )
+                            await asyncio.get_event_loop().run_in_executor(
+                                None,
+                                _process_session_background,
+                                recording.org_id,
+                                recording.session_id,
+                                False,
+                            )
+                except Exception as e:
+                    logger.error(
+                        "Error in periodic stale check",
+                        exc_info=e,
+                    )
+                finally:
+                    db.close()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(
+                    "Unexpected error in periodic stale check loop",
+                    exc_info=e,
+                )
+                await asyncio.sleep(60)  # Wait before retrying on error
+
+    # Start periodic checking task
+    asyncio.create_task(periodic_stale_check())
+    logger.info("Started periodic stale session checker (every 5 minutes)")
 
 
 @asynccontextmanager

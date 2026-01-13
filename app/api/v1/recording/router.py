@@ -125,11 +125,9 @@ def analyze_recording(
     db: Session = Depends(get_db),
 ):
     try:
-        recording = service.check_recording_belonging_to_org(
-            db, recording_id, payload.org.id
-        )
+        service.check_recording_belonging_to_org(db, recording_id, payload.org.id)
         background_tasks.add_task(
-            service.analyze_recording, db, payload.org.id, recording_id, recording
+            service.analyze_recording, payload.org.id, recording_id
         )
         return {"message": f"Analysis started for recording {recording_id}"}
     except Exception as e:

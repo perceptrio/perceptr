@@ -18,20 +18,28 @@ class FilesDownloader:
 
     def download_file_from_s3(self, key: str) -> str:
         file_name = os.path.basename(key)
-        if file_name.endswith('.quicktime'):
-            file_name = file_name.replace('.quicktime', '.mov')
+        if file_name.endswith(".quicktime"):
+            file_name = file_name.replace(".quicktime", ".mov")
         local_file_path = os.path.join(self.temp_dir, file_name)
         self.s3_client.download_file(self.bucket_name, key, local_file_path)
         logger.info(f"Downloaded {key} to {local_file_path}")
         return local_file_path
-    
+
     def download_all_session_batches(self, key: str) -> list[str]:
         local_file_paths = []
-        for obj in self.s3_client.list_objects_v2(Bucket=self.bucket_name, Prefix=key)['Contents']:
-            filename = os.path.basename(obj['Key'])
+        response = self.s3_client.list_objects_v2(Bucket=self.bucket_name, Prefix=key)
+        # Handle case when no objects are found (no 'Contents' key in response)
+        if "Contents" not in response:
+            logger.warning(f"No objects found in S3 for prefix: {key}")
+            return local_file_paths
+
+        for obj in response["Contents"]:
+            filename = os.path.basename(obj["Key"])
             if filename.startswith("batch_"):
                 local_file_path = os.path.join(self.temp_dir, filename)
-                self.s3_client.download_file(self.bucket_name, obj['Key'], local_file_path)
+                self.s3_client.download_file(
+                    self.bucket_name, obj["Key"], local_file_path
+                )
                 local_file_paths.append(local_file_path)
         return local_file_paths
 

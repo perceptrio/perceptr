@@ -10,7 +10,6 @@ from langchain_openai import ChatOpenAI
 from langfuse.decorators import langfuse_context, observe
 from langgraph.graph import END, START, StateGraph
 from settings import settings
-
 from typing_extensions import TypedDict
 
 os.environ["LANGFUSE_PUBLIC_KEY"] = settings.LANGFUSE_PUBLIC_KEY
@@ -24,22 +23,27 @@ from pydantic import BaseModel, Field
 
 class TimestampDescription(BaseModel):
     """A timestamp in the recording. Use the timestamp to describe the user's actions. Don't miss any timestamp."""
+
     description: str = Field(
         description="A detailed description of the user's actions, and what's happening on the screen."
     )
     timestamp: str = Field(description="The timestamp in the recording. Format: MM:SS")
 
-class Finding(BaseModel): # Renamed from Insight
+
+class Finding(BaseModel):  # Renamed from Insight
     """A finding identified from the recording."""
+
     description: str = Field(
-        description="A detailed description of the finding." # Updated description
+        description="A detailed description of the finding."  # Updated description
     )
     category: str = Field(
-        description="The category of the finding. Can be one of: BUG, USABILITY_ISSUE, PERFORMANCE_ISSUE, ENHANCEMENT" # Updated description
+        description="The category of the finding. Can be one of: BUG, USABILITY_ISSUE, PERFORMANCE_ISSUE, ENHANCEMENT"  # Updated description
     )
+
 
 class TimestampInterval(BaseModel):
     """A timestamp interval in the recording."""
+
     start_time: str = Field(
         description="The start time of the interval in the recording. Format: MM:SS"
     )
@@ -47,27 +51,33 @@ class TimestampInterval(BaseModel):
         description="The end time of the interval in the recording. Format: MM:SS"
     )
     description: str = Field(
-        description="A detailed description of the user's actions and system behavior within the interval." # Slightly refined description
+        description="A detailed description of the user's actions and system behavior within the interval."  # Slightly refined description
     )
-    findings: Optional[List[Finding]] = Field( # Renamed from insights, updated type hint
-        default=None, # Explicitly default to None if preferred over implicit Optional behavior
-        description="A list of findings identified during this interval. If there are no findings, leave it empty or null." # Updated description
+    findings: Optional[
+        List[Finding]
+    ] = Field(  # Renamed from insights, updated type hint
+        default=None,  # Explicitly default to None if preferred over implicit Optional behavior
+        description="A list of findings identified during this interval. If there are no findings, leave it empty or null.",  # Updated description
     )
-    short_title: str = Field(description="A short title summarizing the main activity or purpose of the interval.") # Slightly refined description
+    short_title: str = Field(
+        description="A short title summarizing the main activity or purpose of the interval."
+    )  # Slightly refined description
     timestamp_descriptions: List[TimestampDescription] = Field(
-        description="A list of timestamp descriptions for every distinct timestamp/frame within the interval. Don't miss any." # Updated description
+        description="A list of timestamp descriptions for every distinct timestamp/frame within the interval. Don't miss any."  # Updated description
     )
 
+
 class RecordingAnalysis(BaseModel):
-    """The analysis of the user session recording, broken down into intervals.""" # Slightly refined description
+    """The analysis of the user session recording, broken down into intervals."""  # Slightly refined description
+
     intervals: List[TimestampInterval] = Field(
-        description="A list of logical intervals covering the entire recording." # Updated description
+        description="A list of logical intervals covering the entire recording."  # Updated description
     )
     summary: str = Field(
-        description="A concise summary of the user's overall journey, key actions, observed emotional state (if discernible), main findings (issues/opportunities), and actionable recommendations." # Updated description
+        description="A concise summary of the user's overall journey, key actions, observed emotional state (if discernible), main findings (issues/opportunities), and actionable recommendations."  # Updated description
     )
     title: str = Field(
-        description="A title for the recording analysis, summarizing the main user task or overall session theme." # Updated description
+        description="A title for the recording analysis, summarizing the main user task or overall session theme."  # Updated description
     )
 
 
@@ -86,12 +96,11 @@ class VideoRecordingAnalyzerGraph:
             streaming=True,
             temperature=0,
         )
+
         self.gemini_llm = ChatGoogleGenerativeAI(
             api_key=settings.GEMINI_API_KEY,
-            # model="gemini-2.5-pro-preview-05-06",
-            model="gemini-2.5-flash-preview-04-17",
-            # model="gemini-2.0-flash",
-            streaming=True,
+            model="gemini-2.5-flash-preview-09-2025",
+            # model="gemini-3-flash-preview",
             temperature=0,
         )
         # Configure genai client for file uploads
@@ -104,7 +113,6 @@ class VideoRecordingAnalyzerGraph:
         graph_builder.add_edge("recording_analyzer", END)
 
         self.graph = graph_builder.compile()
-
 
     def gemini_recording_analyzer(
         self, recording_path: str, file_type: str

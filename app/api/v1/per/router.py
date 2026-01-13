@@ -112,7 +112,6 @@ async def get_batch_upload_url(
         # Schedule delayed check for stale recordings
         background_tasks.add_task(
             service.check_and_process_stale_recording,
-            db,
             org.id,
             session_id,
         )

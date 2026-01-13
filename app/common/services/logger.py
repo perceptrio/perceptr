@@ -73,6 +73,14 @@ class ContextLogger:
             )
         if settings.LOG_STYLE != "json":
             message = f"{message} {','.join(f'{k}: {v}' for k, v in extra.items())}"
+            if exc_info:
+                print(
+                    "".join(
+                        traceback.format_exception(
+                            type(exc_info), exc_info, exc_info.__traceback__
+                        )
+                    )
+                )
         self.logger.log(level, message, extra=extra)
 
     def debug(
