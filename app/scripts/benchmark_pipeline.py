@@ -192,12 +192,14 @@ def _ensure_assets(assets_dir: Path) -> Dict[str, Path]:
     events_json = assets_dir / "events.json"
     video = assets_dir / "video.mp4"
 
-    if not events_gzip.exists() and not events_json.exists():
-        raise FileNotFoundError(
-            f"Neither events.json.gzip nor events.json found in {assets_dir}"
-        )
+    if not events_gzip.exists():
+        raise FileNotFoundError(f"events.json.gzip not found in {assets_dir}")
+    if not events_json.exists():
+        if not QUIET:
+            print(f"events.json not found in {assets_dir}")
     if not video.exists():
-        raise FileNotFoundError(f"video.mp4 not found in {assets_dir}")
+        if not QUIET:
+            print(f"video.mp4 not found in {assets_dir}")
 
     return {
         "events_gzip": events_gzip,
