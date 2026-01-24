@@ -6,8 +6,9 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar, cast
 
 # Thread pool for CPU-intensive video processing (slowdown, chunking)
 # Limited to 2 workers to prevent CPU overload
+num_cores = os.cpu_count() or 2
 _video_processing_executor = ThreadPoolExecutor(
-    max_workers=2, thread_name_prefix="video_processing"
+    max_workers=max(2, num_cores - 1), thread_name_prefix="video_processing"
 )
 
 from api.v1.issue.repository import IssueRepository

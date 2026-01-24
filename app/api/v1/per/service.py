@@ -1,6 +1,7 @@
 import asyncio
 import gzip
 import io
+import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
@@ -19,8 +20,9 @@ from sqlalchemy.orm import Session
 from utils.rrweb import RRWebSessionUtils, merge_rrweb_batches
 
 # Thread pool for CPU-intensive video processing tasks
+num_cores = os.cpu_count() or 2
 _video_processing_executor = ThreadPoolExecutor(
-    max_workers=2, thread_name_prefix="video_processing"
+    max_workers=max(2, num_cores - 1), thread_name_prefix="video_processing"
 )
 
 
