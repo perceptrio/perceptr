@@ -43,7 +43,7 @@ services:
       - SLOW_DOWN_FACTOR=${SLOW_DOWN_FACTOR}
 
     volumes:
-      - ./logs:/app/logs
+      - ./logs:/logs
     expose:
       - "8000"
 
@@ -58,7 +58,6 @@ services:
       - "443:443"
       - "443:443/udp"
     volumes:
-      # Match official Caddy pattern: mount conf directory to /etc/caddy
       - ./caddy/prod:/etc/caddy
       - caddy_data:/data
       - caddy_config:/config

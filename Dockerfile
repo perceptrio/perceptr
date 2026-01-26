@@ -17,8 +17,7 @@ RUN npx playwright install-deps
 # Install uv
 RUN pip install --no-cache-dir uv
 
-WORKDIR /app
-
+WORKDIR /
 # Copy the pyproject.toml file first for dependency installation
 COPY pyproject.toml ./
 
