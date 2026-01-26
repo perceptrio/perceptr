@@ -11,7 +11,6 @@ services:
       - perceptr-network
     env_file:
       - .env
-    # Expose port 8000 internally (not to host)
     expose:
       - "8000"
 
@@ -19,12 +18,16 @@ services:
     image: caddy:2-alpine
     container_name: perceptr-caddy
     restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
     ports:
       - "80:80"
       - "443:443"
-      - "443:443/udp"  # For HTTP/3 (QUIC)
+      - "443:443/udp"
     volumes:
-      - ./Caddyfile.local:/etc/caddy/Caddyfile:ro
+      # Match official Caddy pattern: mount conf directory to /etc/caddy
+      # For local dev, use Caddyfile.local (rename it to Caddyfile in conf/)
+      - ./caddy/local:/etc/caddy
       - caddy_data:/data
       - caddy_config:/config
     networks:
@@ -38,6 +41,4 @@ networks:
 
 volumes:
   caddy_data:
-    # Persistent storage for SSL certificates
   caddy_config:
-    # Persistent storage for Caddy configuration

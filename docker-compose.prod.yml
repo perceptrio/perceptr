@@ -45,7 +45,6 @@ services:
       - SLOW_DOWN_FACTOR=${SLOW_DOWN_FACTOR}
 
     volumes:
-      # Add persistent volumes if needed
       - ./logs:/app/logs
     expose:
       - "8000"
@@ -54,12 +53,16 @@ services:
     image: caddy:2-alpine
     container_name: perceptr-caddy
     restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
     ports:
       - "80:80"
       - "443:443"
       - "443:443/udp"
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Match official Caddy pattern: mount conf directory to /etc/caddy
+      # Caddyfile should be at ./conf/Caddyfile
+      - ./caddy/prod:/etc/caddy
       - caddy_data:/data
       - caddy_config:/config
       - caddy_logs:/var/log/caddy
