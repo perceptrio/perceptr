@@ -1,4 +1,4 @@
-analytics-v2.perceptr.io {
+analytics-api.perceptr.io {
     # Reverse proxy to the FastAPI application
     reverse_proxy api:8000 {
     }
