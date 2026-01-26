@@ -1,0 +1,50 @@
+name: Deploy to Hostinger
+
+on:
+  push:
+    branches: [main, production]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Deploy to Hostinger
+        uses: hostinger/deploy-on-vps@v2
+        with:
+          api-key: ${{ secrets.HOSTINGER_API_KEY }}
+          virtual-machine: ${{ secrets.HOSTINGER_VM_ID }}
+          project-name: perceptr-api
+          docker-compose-path: docker-compose.prod.yml
+          environment-variables: |
+            # Perceptr API Environment Variables
+            BREVO_API_KEY=${{ secrets.BREVO_API_KEY }}
+            OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+            GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+
+            LANGFUSE_PUBLIC_KEY=${{ secrets.LANGFUSE_PUBLIC_KEY }}
+            LANGFUSE_PRIVATE_KEY=${{ secrets.LANGFUSE_PRIVATE_KEY }}
+            LANGFUSE_HOST=${{ secrets.LANGFUSE_HOST }}
+
+            DATABASE_URL=${{ secrets.DATABASE_URL }}
+
+            SECRET_KEY=${{ secrets.SECRET_KEY }}
+            REFRESH_SECRET_KEY=${{ secrets.REFRESH_SECRET_KEY }}
+            ALGORITHM=HS256
+            ACCESS_TOKEN_EXPIRE_MINUTES=60
+            REFRESH_TOKEN_EXPIRE_DAYS=8760
+            LOG_STYLE=json
+
+
+            AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
+            AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
+            AWS_REGION=${{ secrets.AWS_REGION }}
+            AWS_BUCKET_NAME=${{ secrets.AWS_BUCKET_NAME }}
+            SQS_QUEUE_URL=${{ secrets.SQS_QUEUE_URL }}
+            # AI analysis settings
+            AI_ANALYSIS_ENABLED=${{ secrets.AI_ANALYSIS_ENABLED }}
+            STALE_SESSION_DURATION=${{ secrets.STALE_SESSION_DURATION }}
+            RECORDING_INTERVAL_DURATION=${{ secrets.RECORDING_INTERVAL_DURATION }}
+            SLOW_DOWN_FACTOR=${{ secrets.SLOW_DOWN_FACTOR }}

@@ -165,3 +165,8 @@ documents/
 recordings/
 
 __rrvideo__temp__/
+
+# Docker volumes (local development)
+caddy_data/
+caddy_config/
+caddy_logs/

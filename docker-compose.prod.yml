@@ -1,0 +1,78 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: perceptr-api
+    restart: unless-stopped
+    networks:
+      - perceptr-network
+    environment:
+      # Perceptr API Environment Variables
+      - BREVO_API_KEY=${BREVO_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+
+      # LangFuse Configuration
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY}
+      - LANGFUSE_PRIVATE_KEY=${LANGFUSE_PRIVATE_KEY}
+      - LANGFUSE_HOST=${LANGFUSE_HOST}
+
+      # Database Configuration
+      - DATABASE_URL=${DATABASE_URL}
+
+      # JWT Security Keys
+      - SECRET_KEY=${SECRET_KEY}
+      - REFRESH_SECRET_KEY=${REFRESH_SECRET_KEY}
+      - ALGORITHM=${ALGORITHM}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES}
+      - REFRESH_TOKEN_EXPIRE_DAYS=${REFRESH_TOKEN_EXPIRE_DAYS}
+
+      # AWS Configuration
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION}
+      - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
+      - SQS_QUEUE_URL=${SQS_QUEUE_URL}
+
+      # Application Settings
+      - LOG_STYLE=${LOG_STYLE}
+      - AI_ANALYSIS_ENABLED=${AI_ANALYSIS_ENABLED}
+      - STALE_SESSION_DURATION=${STALE_SESSION_DURATION}
+      - RECORDING_INTERVAL_DURATION=${RECORDING_INTERVAL_DURATION}
+      - SLOW_DOWN_FACTOR=${SLOW_DOWN_FACTOR}
+
+    volumes:
+      # Add persistent volumes if needed
+      - ./logs:/app/logs
+    expose:
+      - "8000"
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: perceptr-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+      - caddy_logs:/var/log/caddy
+    networks:
+      - perceptr-network
+    depends_on:
+      - api
+
+networks:
+  perceptr-network:
+    driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:
+  caddy_logs:

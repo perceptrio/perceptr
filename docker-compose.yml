@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: perceptr-api
+    restart: unless-stopped
+    networks:
+      - perceptr-network
+    env_file:
+      - ./app/.env
+    # Expose port 8000 internally (not to host)
+    expose:
+      - "8000"
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: perceptr-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"  # For HTTP/3 (QUIC)
+    volumes:
+      - ./Caddyfile.local:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - perceptr-network
+    depends_on:
+      - api
+
+networks:
+  perceptr-network:
+    driver: bridge
+
+volumes:
+  caddy_data:
+    # Persistent storage for SSL certificates
+  caddy_config:
+    # Persistent storage for Caddy configuration
