@@ -19,6 +19,10 @@ jobs:
           project-name: perceptr-api
           docker-compose-path: docker-compose.prod.yml
           environment-variables: |
+            ENVIRONMENT=prod
+            HOST=0.0.0.0
+            PORT=8000
+            WORKERS=1
             # Perceptr API Environment Variables
             BREVO_API_KEY=${{ secrets.BREVO_API_KEY }}
             OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}

@@ -10,7 +10,7 @@ services:
     networks:
       - perceptr-network
     env_file:
-      - ./app/.env
+      - .env
     # Expose port 8000 internally (not to host)
     expose:
       - "8000"

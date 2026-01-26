@@ -3,7 +3,7 @@
 ## Prerequisites
 - Python 3.11 or higher
 - PostgreSQL
-- Poetry (Python package manager)
+- uv (Python package manager)
 
 ## Installation
 
@@ -13,15 +13,18 @@ git clone <repository-url>
 cd perceptr
 ```
 
-2. Install dependencies using Poetry:
+2. Install uv (if not already installed):
 ```bash
-pip install poetry
-poetry install
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-3. Create a `.env` file in the app directory:
+3. Install dependencies using uv:
 ```bash
-cd app
+uv sync
+```
+
+3. Create a `.env` file:
+```bash
 cp .env.example .env
 ```
 
@@ -40,8 +43,7 @@ createdb perceptr
 
 2. Run database migrations:
 ```bash
-cd app
-alembic upgrade head
+uv run alembic upgrade head
 ```
 
 If you need to reset migrations:
@@ -65,10 +67,14 @@ alembic upgrade <target-revision> || alembic downgrade <target-revision>
 
 ## Running the Application
 
-1. Start the server (from the app directory):
+1. Start the server using uv:
 ```bash
-cd app
-uvicorn main:app --reload --workers 4 --host 0.0.0.0 --port 8000
+uv run uvicorn main:app --reload --workers 4 --host 0.0.0.0 --port 8000
+```
+
+Or run it as a Python script:
+```bash
+uv run python main.py
 ```
 
 The API will be available at `http://localhost:8000`
@@ -129,10 +135,10 @@ To set up your development environment with these tools:
 
 ```bash
 # Install dependencies including dev tools
-poetry install --with dev
+uv pip install -e ".[dev]"
 
 # Install pre-commit hooks
-poetry run pre-commit install
+uv run pre-commit install
 ```
 
 For more details, see [docs/linting.md](docs/linting.md).
