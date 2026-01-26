@@ -15,16 +15,15 @@ except ImportError:
     resource = None  # type: ignore[assignment]
 
 
-ROOT_DIR = Path(__file__).resolve().parents[2]
+ROOT_DIR = Path(__file__).resolve().parents[1]
 
 ALL_METRICS: List[Dict[str, Any]] = []
 ALL_RUN_SUMMARIES: List[Dict[str, Any]] = []
 SESSION_DURATION_SEC: Optional[float] = None
 QUIET: bool = False
 
-app_path = ROOT_DIR / "app"
-if str(app_path) not in sys.path:
-    sys.path.insert(0, str(app_path))
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 from settings import settings  # type: ignore  # noqa: E402
 from utils.recording import (  # type: ignore  # noqa: E402
@@ -456,7 +455,7 @@ def main() -> None:
     parser.add_argument(
         "--assets-dir",
         type=str,
-        default=str(app_path / "scripts" / "assets"),
+        default=str(ROOT_DIR / "scripts" / "assets"),
         help="Directory containing events.json(.gzip) and video.mp4 "
         "(default: app/scripts/assets under project root).",
     )
