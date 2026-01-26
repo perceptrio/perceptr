@@ -122,27 +122,6 @@ curl http://localhost:8000/api/v1/orgs/me \
   -H "Authorization: Bearer your-token-here"
 ```
 
-## Code Style and Linting
-
-This project uses several tools to maintain code quality and consistency:
-
-- **Black** for code formatting
-- **isort** for import sorting
-- **Flake8** and **Ruff** for linting
-- **mypy** for type checking
-
-To set up your development environment with these tools:
-
-```bash
-# Install dependencies including dev tools
-uv pip install -e ".[dev]"
-
-# Install pre-commit hooks
-uv run pre-commit install
-```
-
-For more details, see [docs/linting.md](docs/linting.md).
-
 ## AWS ECS
 we are using aws ecs to run the application. the ecs exec command is used to execute commands in the container. the logs command is used to view the logs of the container.
 

@@ -23,8 +23,8 @@ WORKDIR /app
 COPY pyproject.toml ./
 
 # Install dependencies using uv
-# RUN uv pip install --system .
-RUN uv sync
+RUN uv pip install --system .
+# RUN uv sync
 
 # Copy the rest of the application code into the container
 COPY . .
