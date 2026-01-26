@@ -29,5 +29,5 @@ RUN uv sync
 COPY . .
 
 # Set the default command to run the Python script
-# CMD ["uv", "run", "main.py"]
-CMD ["uvicorn", "main:app", "--workers", "4", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uv", "run", "main.py"]
+# CMD ["uvicorn", "main:app", "--workers", "4", "--host", "0.0.0.0", "--port", "8000"]
