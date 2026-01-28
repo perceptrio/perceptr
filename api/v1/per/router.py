@@ -1,4 +1,7 @@
+import json
+import os
 import re
+from typing import Any, Dict
 
 from api.v1.org import service as org_service
 from api.v1.recording import service as recording_service
@@ -9,6 +12,7 @@ from core.constants import APIPath
 from database import get_db
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
+from utils.rrweb import merge_rrweb_batches
 
 from . import service
 from .schema import BatchUrlResponse, GenericResponse
@@ -126,4 +130,86 @@ async def get_batch_upload_url(
         # Return a friendly error
         return BatchUrlResponse(
             success=False, message=f"Failed to generate batch upload URL: {str(e)}"
+        )
+
+
+@router.post(  # type: ignore
+    RECORDING_PATH + "/{session_id}/batch-test",
+    response_model=GenericResponse,
+)
+async def upload_test_batch(
+    project_id: str,
+    session_id: str,
+    payload: Dict[str, Any],
+    db: Session = Depends(get_db),
+) -> GenericResponse:
+    """
+    Test route for the SDK.
+
+    - Accepts a JSON body (`payload`).
+    - Stores it locally under `tmp_session/{session_id}/batch_<n>.json`.
+    - After each upload, merges all local batches into `tmp_session/{session_id}/events.json`.
+    """
+    # Validate project ID and get org (keeps behavior consistent with other routes)
+    org = org_service.get_org_by_project_id(db, project_id)
+    if org is None:
+        raise HTTPException(status_code=400, detail="Invalid project id")
+
+    try:
+        # Local base directory for test sessions
+        base_dir = os.path.join("tmp_session", session_id)
+        os.makedirs(base_dir, exist_ok=True)
+
+        # Discover existing batches to determine the next batch number
+        batch_pattern = re.compile(r"batch_(\d+)\.json$")
+        max_batch = 0
+
+        for name in os.listdir(base_dir):
+            if match := batch_pattern.search(name):
+                batch_num = int(match.group(1))
+                max_batch = max(max_batch, batch_num)
+
+        batch_number = max_batch + 1
+
+        # Save the incoming payload as the current batch_<n>.json locally
+        batch_path = os.path.join(base_dir, f"batch_{batch_number}.json")
+        with open(batch_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+
+        # Collect all local batch files for this session
+        batch_files: list[str] = []
+        for name in os.listdir(base_dir):
+            if batch_pattern.search(name):
+                batch_files.append(os.path.join(base_dir, name))
+
+        if not batch_files:
+            return GenericResponse(
+                success=False, message="No batch files found to merge"
+            )
+
+        # Use existing rrweb utility to merge all batches into events.json
+        merged_path = merge_rrweb_batches(sorted(batch_files))
+        logger.info(
+            "Merged test batches into events.json",
+            session_id=session_id,
+            merged_path=merged_path,
+        )
+
+        return GenericResponse(
+            success=True,
+            message=f"Batch {batch_number} stored locally and events.json updated",
+        )
+    except HTTPException:
+        # Re-raise HTTPExceptions unchanged
+        raise
+    except Exception as e:
+        logger.error(
+            "Failed to store test batch",
+            exc_info=e,
+            project_id=project_id,
+            session_id=session_id,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to store batch for test session",
         )
