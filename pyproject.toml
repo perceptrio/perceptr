@@ -35,4 +35,6 @@ dependencies = [
     "python-json-logger>=3.3.0,<4.0.0",
     "reportlab>=4.4.2,<5.0.0",
     "bcrypt==5.0.0",
+    "ipykernel>=7.1.0",
+    "playwright>=1.49.0",
 ]
