@@ -92,7 +92,6 @@ def delete_file(
     body: DeleteFileBody,
     payload: Annotated[TokenPayload, Depends(GetPayload(type="access"))],
 ):
-    print(f"{payload.org.id}/{body.key}")
     s3_service.delete_file(f"{payload.org.id}/{body.key}")
     return
 

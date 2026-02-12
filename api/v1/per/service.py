@@ -2,6 +2,7 @@ import asyncio
 import gzip
 import io
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
@@ -17,13 +18,20 @@ from fastapi import BackgroundTasks
 from models.recording import Recording
 from settings import settings
 from sqlalchemy.orm import Session
+from utils.recording import get_file_size
 from utils.rrweb import RRWebSessionUtils, merge_rrweb_batches
+from graphs.session_analysis import SessionAnalyzer
+from common.schemas.session_analysis import SessionAnalysisResult
+from api.v1.recording import service as recording_service_module
 
 # Thread pool for CPU-intensive video processing tasks
 num_cores = os.cpu_count() or 2
 _video_processing_executor = ThreadPoolExecutor(
     max_workers=max(2, num_cores - 1), thread_name_prefix="video_processing"
 )
+
+# One stale checker per session at a time; cleared when the checker finishes
+_active_stale_checkers: set[str] = set()
 
 
 def _compress_content(content: str) -> bytes:
@@ -188,47 +196,77 @@ def _process_session_background(
                 recording_service.update_recording(db, recording)
                 return
 
-            # Convert to video - run in thread pool to avoid blocking
-            logger.info("Starting video conversion", session_id=session_id)
-            # Run rrvideo conversion in thread pool to avoid blocking
-            future = _video_processing_executor.submit(session.convert_events_to_video)
-            result = future.result()  # Wait for result but doesn't block main thread
+            # Load raw rrweb session JSON from merged file
+            import json
 
-            if result["success"]:
+            with open(merged_file_path, "r", encoding="utf-8") as f:
+                raw_session = json.load(f)
+
+            logger.info("Running rrweb SessionAnalyzer graph", session_id=session_id)
+            analyzer = SessionAnalyzer()
+            analysis_state = analyzer.analyze(raw_session)
+            result: SessionAnalysisResult = analysis_state["result"]
+            analysis_tier = analysis_state.get("tier", "tier0")
+
+            # Persist analysis using shared recording service helpers
+            rec_repo = recording_service_module.RecordingRepository(db)
+            fresh_recording = rec_repo.get_by_id(recording.id, org_id)
+            if not fresh_recording:
+                raise ValueError(
+                    f"Recording {recording.id} not found while saving session analysis"
+                )
+
+            # Build intervals
+            analyzed_intervals = recording_service_module._build_recording_intervals_from_session_result(  # type: ignore[attr-defined]
+                recording.id, result
+            )
+
+            # Persist intervals
+            from api.v1.recording_intervals import (
+                service as recording_intervals_service,
+            )
+
+            has_intervals = (
+                recording_intervals_service.check_recording_intervals_with_recording_id(
+                    db, recording.id
+                )
+            )
+            if has_intervals:
                 logger.info(
-                    "Video conversion successful",
-                    session_id=session_id,
-                    output_path=result["output_path"],
+                    "Replacing existing intervals for recording",
+                    recording_id=recording.id,
                 )
-                if settings.AI_ANALYSIS_ENABLED:
-                    # Run analysis in thread pool to avoid blocking
-                    future = _video_processing_executor.submit(
-                        recording_service.analyze_local_recording_video,
-                        db,
-                        org_id,
-                        recording.id,
-                        recording,
-                        result["output_path"],
-                    )
-                    future.result()  # Wait for completion
-                else:
-                    # Update status to COMPLETED if analysis is disabled
-                    recording = recording_service.get_recording(
-                        db, recording.id, org_id
-                    )
-                    recording.set_analysis_status(AnalysisStatus.COMPLETED)
-                    recording.analysis_error = None
-                    recording_service.update_recording(db, recording)
-                    logger.info(
-                        "AI analysis skipped - disabled in settings",
-                        session_id=session_id,
-                    )
+                recording_intervals_service.replace_recording_intervals(
+                    db, recording.id, analyzed_intervals
+                )
             else:
-                error_msg = result.get("error", result.get("message", "Unknown error"))
-                logger.error(
-                    "Video conversion failed", session_id=session_id, error=error_msg
+                logger.info(
+                    "Creating new intervals for recording",
+                    recording_id=recording.id,
                 )
-                raise Exception(f"Video conversion failed: {error_msg}")
+                recording_intervals_service.batch_create_recording_intervals(
+                    db, analyzed_intervals
+                )
+
+            # Process issues & tags
+            recording_service_module.process_issues_from_session_result(
+                db,
+                org_id,
+                recording.id,
+                analyzed_intervals,
+                result,
+                analysis_tier=analysis_tier,
+            )
+
+            # Update recording summary/title directly from SessionAnalysisResult
+            fresh_recording.summary = result.summary
+            fresh_recording.short_title = result.title
+            fresh_recording.set_analysis_status(AnalysisStatus.COMPLETED)
+            fresh_recording.analysis_error = None
+            fresh_recording.analysis_progress = 100
+            fresh_recording.file_duration = session.duration
+            fresh_recording.file_size = get_file_size(merged_file_path)
+            rec_repo.update(fresh_recording)
 
     except Exception as e:
         error_type = type(e).__name__
@@ -264,7 +302,6 @@ def _process_session_background(
 
 
 def process_session(
-    db: Session,
     org_id: int,
     session_id: str,
     background_tasks: BackgroundTasks,
@@ -289,10 +326,10 @@ def process_session(
 
 def upsert_session_for_batch(db: Session, org_id: int, session_id: str) -> Recording:
     """Upsert a recording for batch upload: create if not exist, else update updated_at only."""
-
     recording = recording_service.get_recording_by_session_id(session_id, org_id, db)
+    now = datetime.now(UTC)
     if recording:
-        recording.updated_at = datetime.now(UTC)
+        recording.updated_at = now
         recording_service.update_recording(db, recording)
         return recording
     else:
@@ -307,11 +344,11 @@ def upsert_session_for_batch(db: Session, org_id: int, session_id: str) -> Recor
         return recording_service.create_recording(db, recording_create)
 
 
-async def check_and_process_stale_recording_async(org_id: int, session_id: str):
-    """Async version of stale recording checker - uses asyncio.sleep instead of blocking time.sleep"""
-    # Use async sleep to avoid blocking the event loop
+async def check_and_process_stale_recording_async(org_id: int, session_id: str) -> bool:
+    """Wait, then run one check. Only process if DB and S3 are both stale (avoids racing SDK uploads).
+    Returns True if no reschedule needed (processed or not PENDING); False if still PENDING and not processed (caller may reschedule).
+    """
     await asyncio.sleep(settings.STALE_SESSION_DURATION + 5)
-
     db = SessionLocal()
     try:
         recording = recording_service.get_recording_by_session_id(
@@ -319,7 +356,7 @@ async def check_and_process_stale_recording_async(org_id: int, session_id: str):
         )
         if not recording:
             # TODO: maybe add a cleaner to delete stale batches in s3?
-            return
+            return True
 
         # Use UTC for comparison
         now = datetime.now(UTC)
@@ -329,18 +366,52 @@ async def check_and_process_stale_recording_async(org_id: int, session_id: str):
         if updated_at_value and updated_at_value.tzinfo is None:
             updated_at_value = updated_at_value.replace(tzinfo=UTC)
 
-        if recording.analysis_status == AnalysisStatus.PENDING.value and (
-            now - updated_at_value
-        ) > timedelta(seconds=settings.STALE_SESSION_DURATION):
-            # Trigger processing - run sync function in thread pool
+        time_since_update = (now - updated_at_value).total_seconds()
+
+        # S3: batch count and last upload time (one list call per check)
+        session_prefix = f"{org_id}/{session_id}/"
+        existing_files = s3_service.list_folder_contents(session_prefix)
+        batch_pattern = re.compile(r"batch_(\d+)\.json$")
+        batch_files = [
+            f for f in existing_files if batch_pattern.search(f.get("key", ""))
+        ]
+        batch_count = len(batch_files)
+
+        most_recent_batch_time = None
+        if batch_files:
+            times = [
+                f.get("last_modified") for f in batch_files if f.get("last_modified")
+            ]
+            if times:
+                aware = [
+                    t.replace(tzinfo=UTC) if t.tzinfo is None else t for t in times
+                ]
+                most_recent_batch_time = max(aware)
+
+        # Process only if DB and S3 are both stale (no recent URL request and no recent upload)
+        is_db_stale = time_since_update > settings.STALE_SESSION_DURATION
+        time_since_last_batch = (
+            (now - most_recent_batch_time).total_seconds()
+            if most_recent_batch_time
+            else float("inf")
+        )
+        is_batch_stale = time_since_last_batch > settings.STALE_SESSION_DURATION
+        should_process = (
+            recording.analysis_status == AnalysisStatus.PENDING.value
+            and is_db_stale
+            and batch_count > 0
+            and is_batch_stale
+        )
+
+        if should_process:
             logger.info(
                 "Stale session detected, triggering processing",
                 session_id=session_id,
                 org_id=org_id,
-                updated_at=updated_at_value,
-                now=now,
+                batch_count=batch_count,
+                time_since_update=time_since_update,
+                time_since_last_batch=time_since_last_batch,
             )
-            # Run sync function in thread pool to avoid blocking
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(
                 None,
@@ -349,14 +420,17 @@ async def check_and_process_stale_recording_async(org_id: int, session_id: str):
                 session_id,
                 False,
             )
+            return True  # we processed, no reschedule
         else:
             logger.info(
-                "Session is not stale or already processed",
+                "Session not stale or already processed",
                 session_id=session_id,
                 org_id=org_id,
                 status=recording.analysis_status,
-                time_since_update=(now - updated_at_value).total_seconds(),
+                time_since_update=time_since_update,
             )
+            # Still PENDING and we didn't process → caller should reschedule so we check again later
+            return recording.analysis_status != AnalysisStatus.PENDING.value
     except Exception as e:
         logger.error(
             "Error in stale recording checker",
@@ -364,23 +438,39 @@ async def check_and_process_stale_recording_async(org_id: int, session_id: str):
             session_id=session_id,
             org_id=org_id,
         )
+        return True  # on error don't reschedule
     finally:
         db.close()
 
 
-def check_and_process_stale_recording(org_id: int, session_id: str):
-    """Wrapper to run async stale checker - creates task in event loop"""
-    # Create a task in the event loop
+def check_and_process_stale_recording(org_id: int, session_id: str) -> None:
+    """Schedule at most one stale checker per session; skip if one is already running."""
+    key = f"{org_id}:{session_id}"
+    if key in _active_stale_checkers:
+        return
+
+    _active_stale_checkers.add(key)
+
+    async def run_then_clear() -> None:
+        rescheduled = False
+        try:
+            no_reschedule = await check_and_process_stale_recording_async(
+                org_id, session_id
+            )
+            if not no_reschedule:
+                # Still PENDING and we didn't process (e.g. new batch arrived); run one more check later
+                _active_stale_checkers.discard(key)
+                check_and_process_stale_recording(org_id, session_id)
+                rescheduled = True
+        finally:
+            if not rescheduled:
+                _active_stale_checkers.discard(key)
+
     try:
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            # If loop is running, create a task
-            asyncio.create_task(
-                check_and_process_stale_recording_async(org_id, session_id)
-            )
+            asyncio.create_task(run_then_clear())
         else:
-            # If no loop is running, run it
-            asyncio.run(check_and_process_stale_recording_async(org_id, session_id))
+            asyncio.run(run_then_clear())
     except RuntimeError:
-        # If no event loop exists, create one
-        asyncio.run(check_and_process_stale_recording_async(org_id, session_id))
+        asyncio.run(run_then_clear())

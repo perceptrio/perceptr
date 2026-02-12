@@ -52,7 +52,7 @@ async def process_session_api(
     if org is None:
         raise HTTPException(status_code=400, detail="Invalid project id")
     try:
-        service.process_session(db, org.id, session_id, background_tasks, force)
+        service.process_session(org.id, session_id, background_tasks, force)
         return GenericResponse(success=True, message="Session triggered successfully")
     except Exception as e:
         logger.error(f"Failed to process session", exc_info=e)
@@ -109,7 +109,7 @@ async def get_batch_upload_url(
             expiration=3600,  # 1 hour expiration
         )
 
-        # Schedule delayed check for stale recordings
+        # At most one stale checker per session; skips if already scheduled
         background_tasks.add_task(
             service.check_and_process_stale_recording,
             org.id,

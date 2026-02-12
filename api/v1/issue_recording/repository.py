@@ -64,11 +64,18 @@ class IssueRecordingRepository:
         )
 
     def get_by_recording(
-        self, org_id: int, recording_id: int
-    ) -> list[IssueRecording]:
+        self,
+        org_id: int,
+        recording_id: int,
+        skip: int = 0,
+        limit: int = 100,
+        is_resolved: bool = None,
+        category: str = None,
+    ) -> list[tuple[IssueRecording, str, bool]]:
         """Get all issue relationships for a recording"""
-        return (
-            self.db.query(IssueRecording)
+        query = (
+            self.db.query(IssueRecording, Issue.title, Issue.is_resolved)
+            .join(Issue, IssueRecording.issue_id == Issue.id)
             .filter(
                 and_(
                     IssueRecording.org_id == org_id,
@@ -76,12 +83,17 @@ class IssueRecordingRepository:
                     IssueRecording.deleted_at == None,
                 )
             )
-            .all()
         )
 
-    def get_by_issue(
-        self, org_id: int, issue_id: int
-    ) -> list[IssueRecording]:
+        if is_resolved is not None:
+            query = query.filter(Issue.is_resolved == is_resolved)
+
+        if category:
+            query = query.filter(Issue.category == category)
+
+        return query.offset(skip).limit(limit).all()
+
+    def get_by_issue(self, org_id: int, issue_id: int) -> list[IssueRecording]:
         """Get all recording relationships for an issue"""
         return (
             self.db.query(IssueRecording)

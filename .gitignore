@@ -167,3 +167,5 @@ __rrvideo__temp__/
 caddy_data/
 caddy_config/
 caddy_logs/
+
+scripts/assets

@@ -62,9 +62,7 @@ class IssuesSummarizerGraph:
         graph_builder = StateGraph(State)
         self.openai_llm = ChatOpenAI(
             api_key=settings.OPENAI_API_KEY,
-            model="gpt-4.1-mini",
-            streaming=True,
-            temperature=0,
+            model="gpt-5-mini-2025-08-07",
         )
         graph_builder.add_node("issues_summarizer", self.issues_summarizer)
         graph_builder.add_edge(START, "issues_summarizer")

@@ -57,7 +57,9 @@ class IssueRepository:
         if search:
             search = f"%{search}%"
             query = query.filter(
-                Issue.title.ilike(search) | Issue.description.ilike(search)
+                Issue.title.ilike(search)
+                | Issue.description.ilike(search)
+                | Issue.root_cause.ilike(search)
             )
 
         if categories is not None:

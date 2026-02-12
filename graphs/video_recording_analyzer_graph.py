@@ -3,6 +3,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from common.services.logger import logger
+from common.schemas.session_analysis import SessionAnalysisResult
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -18,72 +19,11 @@ os.environ["LANGFUSE_HOST"] = settings.LANGFUSE_HOST
 
 import numpy as np
 from google import genai
-from pydantic import BaseModel, Field
-
-
-class TimestampDescription(BaseModel):
-    """A timestamp in the recording. Use the timestamp to describe the user's actions. Don't miss any timestamp."""
-
-    description: str = Field(
-        description="A detailed description of the user's actions, and what's happening on the screen."
-    )
-    timestamp: str = Field(description="The timestamp in the recording. Format: MM:SS")
-
-
-class Finding(BaseModel):  # Renamed from Insight
-    """A finding identified from the recording."""
-
-    description: str = Field(
-        description="A detailed description of the finding."  # Updated description
-    )
-    category: str = Field(
-        description="The category of the finding. Can be one of: BUG, USABILITY_ISSUE, PERFORMANCE_ISSUE, ENHANCEMENT"  # Updated description
-    )
-
-
-class TimestampInterval(BaseModel):
-    """A timestamp interval in the recording."""
-
-    start_time: str = Field(
-        description="The start time of the interval in the recording. Format: MM:SS"
-    )
-    end_time: str = Field(
-        description="The end time of the interval in the recording. Format: MM:SS"
-    )
-    description: str = Field(
-        description="A detailed description of the user's actions and system behavior within the interval."  # Slightly refined description
-    )
-    findings: Optional[
-        List[Finding]
-    ] = Field(  # Renamed from insights, updated type hint
-        default=None,  # Explicitly default to None if preferred over implicit Optional behavior
-        description="A list of findings identified during this interval. If there are no findings, leave it empty or null.",  # Updated description
-    )
-    short_title: str = Field(
-        description="A short title summarizing the main activity or purpose of the interval."
-    )  # Slightly refined description
-    timestamp_descriptions: List[TimestampDescription] = Field(
-        description="A list of timestamp descriptions for every distinct timestamp/frame within the interval. Don't miss any."  # Updated description
-    )
-
-
-class RecordingAnalysis(BaseModel):
-    """The analysis of the user session recording, broken down into intervals."""  # Slightly refined description
-
-    intervals: List[TimestampInterval] = Field(
-        description="A list of logical intervals covering the entire recording."  # Updated description
-    )
-    summary: str = Field(
-        description="A concise summary of the user's overall journey, key actions, observed emotional state (if discernible), main findings (issues/opportunities), and actionable recommendations."  # Updated description
-    )
-    title: str = Field(
-        description="A title for the recording analysis, summarizing the main user task or overall session theme."  # Updated description
-    )
 
 
 class State(TypedDict):
     recording_path: str
-    recording_analysis: RecordingAnalysis
+    recording_analysis: SessionAnalysisResult
     file_type: str
 
 
@@ -101,6 +41,7 @@ class VideoRecordingAnalyzerGraph:
             api_key=settings.GEMINI_API_KEY,
             model="gemini-2.5-flash-preview-09-2025",
             # model="gemini-3-flash-preview",
+            # model="gemini-3-pro-preview",
             temperature=0,
         )
         # Configure genai client for file uploads
@@ -116,7 +57,7 @@ class VideoRecordingAnalyzerGraph:
 
     def gemini_recording_analyzer(
         self, recording_path: str, file_type: str
-    ) -> RecordingAnalysis:
+    ) -> SessionAnalysisResult:
         # --- Upload video using File API ---
         logger.info(f"Uploading video file: {recording_path} using File API...")
         # Consider adding error handling for file not found
@@ -178,58 +119,76 @@ class VideoRecordingAnalyzerGraph:
 
         # Create the prompt.
         prompt = """
-You are a highly skilled UX Analyst AI. Your task is to analyze video recordings of user sessions provided as a sequence of timestamped frames or descriptions. Your goal is to meticulously observe user actions, identify any **findings** (bugs, usability problems, performance lags, potential enhancements), and evaluate the UI design at each step.
+You are a highly skilled UX Analyst AI. Your task is to analyze a **video recording** of a user session and produce a **SessionAnalysisResult** object.
+
+Your goal is to:
+- Meticulously observe user actions in the recording
+- Identify UX and technical issues
+- Group the session into logical intervals
+- Output a structured result matching the `SessionAnalysisResult` schema.
 
 **Input:**
-You will receive data representing a user session recording, likely as a series of screenshots or frames, each associated with a timestamp (e.g., MM:SS).
+You will receive the video file and must reason about what is happening on the screen over time.
 
 **Core Task:**
 
-1.  **Analyze Sequentially:** Process the timestamps in chronological order.
-2.  **Identify User Actions:** Determine what the user is doing at each timestamp (e.g., clicking a button, scrolling, typing text, navigating between pages, waiting, hesitating).
-3.  **Observe System Responses:** Note how the system reacts (e.g., loading indicators, page changes, error messages, successful operations, visual feedback).
-4.  **Extract Findings:** Identify any relevant **findings** from the recording:
+1.  **Analyze Sequentially:** Process the recording in chronological order.
+2.  **Identify User Actions:** Determine what the user is doing at each moment (clicks, scrolling, typing, navigation, waiting, hesitation, etc.).
+3.  **Observe System Responses:** Note how the system reacts (loading indicators, page changes, errors, success messages, visual feedback).
+4.  **Extract Issues:** Identify any relevant **issues** from the recording:
 
     *   **Bugs:** Functionality not working as expected, errors, crashes.
-    *   **Usability Issues:** Points of confusion, unexpected behavior, inefficient workflows, difficulty finding information, unclear labels/instructions, design friction.
+    *   **Usability Issues:** Confusion, unclear labels, inefficient flows, difficulty finding information, design friction.
     *   **Performance Issues:** Noticeable delays in loading or responsiveness. Specifically flag delays **exceeding 3 seconds** as `PERFORMANCE_ISSUE`. Do not categorize normal user thinking/reading time as a performance issue.
-    *   **Enhancements:** Observe situations where a feature could be improved or a new feature could significantly help the user's workflow, even if no explicit issue occurred. Think about opportunities for simplification, efficiency gains, or better user guidance.
-5.  **Group into Intervals:** Group consecutive timestamps that represent a single, logical user sub-task or interaction flow (e.g., logging in, filling out a form section, attempting a search, completing a purchase step). Ensure intervals cover the entire session duration without gaps or overlaps in time.
-6.  **Generate Structured Output:** Format your analysis precisely according to the Pydantic models provided (`RecordingAnalysis`, `TimestampInterval`, `Finding`, `TimestampDescription`).
+    *   **Enhancements:** Opportunities to improve UX, simplify flows, or add helpful features, even if nothing explicitly "breaks".
+5.  **Group into Intervals:** Group the session into logical sub-tasks or flows (e.g., logging in, filling a form, searching, completing checkout). Ensure intervals cover the session without gaps or overlaps.
+6.  **Generate Structured Output:** Format your analysis **exactly** as a `SessionAnalysisResult` object.
 
-**Output Structure:**
+**SessionAnalysisResult Schema:**
 
-Generate a single `RecordingAnalysis` JSON object containing:
+Top-level fields:
 
-*   `title`: A title for the recording analysis, summarizing the main user task or overall session theme.
-*   `summary`: A concise summary of the user's overall journey, key actions, observed emotional state (if discernible), main findings (issues/opportunities), and actionable recommendations.
-*   `intervals`: A list of `TimestampInterval` objects. Each interval object must contain:
-    *   `start_time`: The first timestamp (MM:SS) in the interval.
-    *   `end_time`: The last timestamp (MM:SS) in the interval.
-    *   `short_title`: A short title summarizing the main activity or purpose of the interval.
-    *   `description`: A clear, narrative description of the user's actions and system behavior during this specific interval.
-    *   `findings`: A list of `Finding` objects identified within this interval (or null/empty list if none). Each `Finding` object includes:
-        *   `description`: A detailed description of the specific finding.
-        *   `category`: Classify the **finding** as one of: `BUG`, `USABILITY_ISSUE`, `PERFORMANCE_ISSUE`, `ENHANCEMENT`.
-    *   `timestamp_descriptions`: A list of `TimestampDescription` objects, one for each distinct timestamp/frame provided within this interval. Each includes:
-        *   `timestamp`: The specific timestamp (MM:SS).
-        *   `description`: A detailed description of user actions and screen state *at that specific timestamp*.
+*   `title` (str, max 100 chars): Short title summarizing the main user task or session theme.
+*   `summary` (str, max 200 chars): Concise summary of the user's journey, key actions, main issues/opportunities, and overall experience.
+*   `health_score` (float 0–100): Higher = better experience. Penalize multiple or severe issues.
+*   `confidence_score` (float 0–1): How confident you are in this analysis.
+*   `user_actions` (List[str], max 8): Tags describing behavior and emotional state (e.g., hesitant, confused, frustrated, exploring, onboarding, purchasing, form_filling, browsing, searching, stuck, blocked).
+*   `intervals` (List[TimestampInterval]): List of interval objects describing the whole session.
+
+Each `TimestampInterval` MUST contain:
+
+*   `start_time` (str, MM:SS): First timestamp in the interval.
+*   `end_time`   (str, MM:SS): Last timestamp in the interval.
+*   `short_title` (str): Short title summarizing the activity in this interval.
+*   `issues` (List[Issue]): Issues that occur within this interval (can be empty).
+*   `key_events` (List of objects): 3–5 of the most important events in this interval. Each object has `timestamp` (str, format MM:SS) and `description` (str, short human-readable description of what happened at that moment). Same structure as timestamp_descriptions.
+
+Each `Issue` MUST contain:
+
+*   `type`: `rage_click` | `dead_click` | `navigation_loop` | `form_struggle` | `scroll_thrashing` | `unknown`
+*   `frequency` (int): How many repeated actions / occurrences (>= 1).
+*   `timestamp` (str, MM:SS): When this issue first clearly appears.
+*   `severity`: `low` | `medium` | `high` | `critical`
+*   `confidence` (str | null): Your confidence in this issue detection: `high` | `medium` | `low`
+*   `root_cause` (str): Your concise, technical hypothesis of WHY this happened, grounded in what is visible in the recording.
+*   `reproduction_steps` (str): How an engineer could reliably reproduce this issue.
+*   `target` (str | null): Element or URL involved (e.g., `"Reserve Your Spot" button` or `/checkout`).
+*   `category`: `BUG` | `USABILITY_ISSUE` | `PERFORMANCE_ISSUE` | `ENHANCEMENT`
 
 **Category Definitions & Rules:**
 
-*   **BUG:** Use when functionality is broken, an error occurs (system error, validation error preventing progress inappropriately), or the system behaves in a way that prevents task completion correctly. High impact, requires fixing.
-*   **USABILITY_ISSUE:** Use when the user struggles, seems confused, hesitates, takes inefficient paths, expresses frustration (if discernible), or encounters friction due to the design or workflow. The core functionality might still work, but the experience is suboptimal.
-*   **PERFORMANCE_ISSUE:** Use *only* when there is a clear visual indication of loading, processing, or unresponsiveness that lasts noticeably longer than 3 seconds. Requires visual evidence (e.g., spinner, frozen screen). Do *not* use for normal user thinking/reading time between interactions.
-*   **ENHANCEMENT:** Use when you identify an opportunity to improve the existing UI/UX or suggest a new feature based on the user's interaction or workflow, even if no explicit "issue" occurred. This focuses on making tasks easier, faster, clearer, or more delightful.
+*   **BUG:** Use when functionality is broken, an error occurs, or the system prevents correct task completion.
+*   **USABILITY_ISSUE:** Use when the user struggles, is confused, or faces friction due to design or workflow, even if the task eventually succeeds.
+*   **PERFORMANCE_ISSUE:** Use *only* when there is clear visual indication of loading, processing, or unresponsiveness that lasts noticeably longer than 3 seconds.
+*   **ENHANCEMENT:** Use when you see a meaningful opportunity to improve UX or add a valuable feature, even without a hard failure.
 
 **Important Considerations:**
 
-*   **Focus on Observation:** Base your analysis strictly on what is visible/audible in the recording. Infer user intent and emotion cautiously based *only* on their actions and behaviors (e.g., repeated clicks, backtracking, long pauses before action).
-*   **Be Specific & Actionable:** Descriptions for intervals, findings, and timestamps should be clear, detailed, and provide enough context to be understood and potentially acted upon. Avoid vague language.
-*   **Interval Logic:** Group timestamps logically based on the user attempting and completing (or abandoning) a coherent sub-task. Intervals should flow chronologically and cover the entire session.
-*   **Timestamp Granularity:** Ensure every timestamp provided in the input is accounted for within exactly one `TimestampDescription` inside its corresponding `TimestampInterval`.
+*   **Focus on Observation:** Base your analysis strictly on what is visible/audible in the recording. Infer intent/emotion cautiously from behavior (e.g., repeated clicks, backtracking, long pauses).
+*   **Be Specific & Actionable:** Use concrete element names, timestamps, and behaviors so engineers can act on your output.
+*   **Interval Logic:** Group the video into coherent sub-tasks that flow chronologically and cover the entire session.
 
-Now, please analyze the provided user session recording data and generate the structured JSON output conforming to the `RecordingAnalysis` model.
+Now, analyze the user session recording and return a **single JSON object** that strictly conforms to the `SessionAnalysisResult` model.
 
                     """
 
@@ -247,9 +206,9 @@ Now, please analyze the provided user session recording data and generate the st
             )
         ]
         try:
-            response = self.gemini_llm.with_structured_output(RecordingAnalysis).invoke(
-                messages
-            )
+            response = self.gemini_llm.with_structured_output(
+                SessionAnalysisResult
+            ).invoke(messages)
         finally:
             # Clean up the uploaded file on Google Cloud Storage
             # Optional: Keep if you might reuse the file quickly, but generally good to clean up.

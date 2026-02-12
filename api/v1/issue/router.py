@@ -10,9 +10,15 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 from typing_extensions import Annotated
 from utils import get_issues_categories, get_issues_severities, get_issues_sort_by
-
+from api.v1.issue_recording import service as issue_recording_service
 from . import service
-from .schema import IssueCreate, IssueResponse, IssueUpdate, IssueWithIntervalsResponse
+from .schema import (
+    IssueCreate,
+    IssueResponse,
+    IssueUpdate,
+    IssueWithIntervalsResponse,
+    IssueWithRecordingResponse,
+)
 
 router = APIRouter(prefix=f"{APIPath.V1}/issues", tags=["issues"])
 
@@ -68,7 +74,9 @@ def get_issues_for_org(
     return issues
 
 
-@router.get("/by-recording/{recording_id}", response_model=List[IssueResponse])
+@router.get(
+    "/by-recording/{recording_id}", response_model=List[IssueWithRecordingResponse]
+)
 def get_issues_by_recording(
     recording_id: int,
     payload: Annotated[TokenPayload, Depends(GetPayload(type="access"))],
@@ -78,7 +86,7 @@ def get_issues_by_recording(
     is_resolved: bool = None,
     category: IntervalCategory = None,
 ):
-    issues = service.get_issues_by_recording(
+    issue_recordings = issue_recording_service.get_by_recording(
         db,
         payload.org.id,
         recording_id,
@@ -87,7 +95,12 @@ def get_issues_by_recording(
         is_resolved,
         category,
     )
-    return issues
+    return [
+        IssueWithRecordingResponse(
+            **issue[0].__dict__, title=issue[1], is_resolved=issue[2]
+        )
+        for issue in issue_recordings
+    ]
 
 
 @router.patch("/{issue_id}", response_model=IssueResponse)

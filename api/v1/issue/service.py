@@ -27,9 +27,13 @@ def create_issue(db: Session, org_id: int, issue_data: IssueCreate) -> Issue:
         Issue(
             title=issue_data.title,
             description=issue_data.description,
+            root_cause=issue_data.root_cause,
             recommendation=issue_data.recommendation,
             severity=issue_data.severity,
             category=issue_data.category.value,
+            type=issue_data.type,
+            target=issue_data.target,
+            confidence=issue_data.confidence,
             org_id=org_id,
         )
     )
@@ -57,7 +61,7 @@ def get_issue(
         recording_intervals.append(
             RecordingIntervalInfo(
                 recording_file_size=recording.file_size,
-                recording_duration=recording.file_duration,
+                recording_duration=recording.file_duration or 0.0,
                 recording_created_at=recording.created_at,
                 recording_id=recording.id,
                 recording_session_id=recording.session_id,

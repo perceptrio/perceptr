@@ -28,7 +28,9 @@ def create_issue_recording(
     repository = IssueRecordingRepository(db)
 
     # Check if relationship already exists
-    existing = repository.get_by_issue_and_interval(org_id, issue_id, recording_interval_id)
+    existing = repository.get_by_issue_and_interval(
+        org_id, issue_id, recording_interval_id
+    )
     if existing:
         if existing.deleted_at:
             # If soft deleted, reactivate it
@@ -50,9 +52,7 @@ def create_issue_recording(
     return issue_recording
 
 
-def get_issue_recording(
-    db: Session, id: int, org_id: int
-) -> IssueRecording:
+def get_issue_recording(db: Session, id: int, org_id: int) -> IssueRecording:
     """Get a specific issue-recording relationship"""
     repository = IssueRecordingRepository(db)
     issue_recording = repository.get_by_id(id, org_id)
@@ -73,24 +73,28 @@ def get_by_recording_interval(
 
 
 def get_by_recording(
-    db: Session, org_id: int, recording_id: int
-) -> list[IssueRecording]:
+    db: Session,
+    org_id: int,
+    recording_id: int,
+    skip: int = 0,
+    limit: int = 100,
+    is_resolved: bool = None,
+    category: str = None,
+) -> list[tuple[IssueRecording, str, bool]]:
     """Get all issues linked to a recording"""
     repository = IssueRecordingRepository(db)
-    return repository.get_by_recording(org_id, recording_id)
+    return repository.get_by_recording(
+        org_id, recording_id, skip, limit, is_resolved, category
+    )
 
 
-def get_by_issue(
-    db: Session, org_id: int, issue_id: int
-) -> list[IssueRecording]:
+def get_by_issue(db: Session, org_id: int, issue_id: int) -> list[IssueRecording]:
     """Get all recordings linked to an issue"""
     repository = IssueRecordingRepository(db)
     return repository.get_by_issue(org_id, issue_id)
 
 
-def soft_delete_issue_recording(
-    db: Session, id: int, org_id: int
-) -> None:
+def soft_delete_issue_recording(db: Session, id: int, org_id: int) -> None:
     """Soft delete a relationship between an issue and a recording interval"""
     repository = IssueRecordingRepository(db)
     issue_recording = repository.get_by_id(id, org_id)
@@ -102,9 +106,7 @@ def soft_delete_issue_recording(
     repository.soft_delete(issue_recording)
 
 
-def hard_delete_issue_recording(
-    db: Session, id: int, org_id: int
-) -> None:
+def hard_delete_issue_recording(db: Session, id: int, org_id: int) -> None:
     """Hard delete a relationship between an issue and a recording interval"""
     repository = IssueRecordingRepository(db)
     issue_recording = repository.get_by_id(id, org_id)

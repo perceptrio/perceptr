@@ -24,6 +24,7 @@ from fastapi import HTTPException, status
 from graphs.issues_summarizer_graph import IssuesSummarizerGraph
 from graphs.recording_summarizer_graph import RecordingSummarizerGraph
 from graphs.video_recording_analyzer_graph import VideoRecordingAnalyzerGraph
+from common.schemas.session_analysis import KeyEvent, SessionAnalysisResult
 from models.issue import Issue
 from models.issue_recording import IssueRecording
 from models.recording import Recording
@@ -326,7 +327,7 @@ def process_issues(
     db: Session,
     org_id: int,
     recording_id: int,
-    findings: List[Dict[str, Any]],
+    issues_payload: List[Dict[str, Any]],
 ) -> None:
     issue_repository = IssueRepository(db)
     issue_recording_repository = IssueRecordingRepository(db)
@@ -347,37 +348,72 @@ def process_issues(
         )
 
     response = issues_summarizer_graph.aggregate_issues(
-        org_id, recording_id, findings, existing_issues
+        org_id, recording_id, issues_payload, existing_issues
     )
 
+    # Build lookup for original finding by recording_interval_id to get session metadata
+    issues_by_interval = {i["recording_interval_id"]: i for i in issues_payload}
+
     for aggregated_issue in response["aggregated_issues"].issues:
+        # Get the original finding to extract session metadata
+        original_issue = issues_by_interval.get(
+            aggregated_issue.recording_interval_id, {}
+        )
+
         if aggregated_issue.is_new_issue:
+            # Create canonical issue with LLM-generated fields + analyzer metadata
             issue = issue_repository.create(
                 Issue(
                     org_id=org_id,
                     title=aggregated_issue.issue.issue_title,
                     description=aggregated_issue.issue.issue_description,
+                    root_cause=original_issue.get("root_cause"),
                     recommendation=aggregated_issue.issue.issue_recommendation,
                     severity=aggregated_issue.issue.issue_severity,
                     category=aggregated_issue.issue.issue_category,
+                    type=original_issue.get("type"),
+                    target=original_issue.get("target"),
+                    confidence=original_issue.get("confidence"),
                 )
             )
 
+            # Create IssueRecording with session-specific metadata
             issue_recording_repository.create(
                 IssueRecording(
                     org_id=org_id,
                     issue_id=issue.id,
                     recording_id=recording_id,
                     recording_interval_id=aggregated_issue.recording_interval_id,
+                    type=original_issue.get("type"),
+                    target=original_issue.get("target"),
+                    confidence=original_issue.get("confidence"),
+                    timestamp=original_issue.get("timestamp"),
+                    frequency=original_issue.get("frequency"),
+                    severity=original_issue.get("severity"),
+                    category=original_issue.get("category"),
+                    root_cause=original_issue.get("root_cause"),
+                    reproduction_steps=original_issue.get("reproduction_steps"),
+                    analysis_tier=original_issue.get("analysis_tier"),
                 )
             )
         else:
+            # Existing issue: only create IssueRecording with session metadata
             issue_recording_repository.create(
                 IssueRecording(
                     org_id=org_id,
                     issue_id=aggregated_issue.issue.issue_id,
                     recording_id=recording_id,
                     recording_interval_id=aggregated_issue.recording_interval_id,
+                    type=original_issue.get("type"),
+                    target=original_issue.get("target"),
+                    confidence=original_issue.get("confidence"),
+                    timestamp=original_issue.get("timestamp"),
+                    frequency=original_issue.get("frequency"),
+                    severity=original_issue.get("severity"),
+                    category=original_issue.get("category"),
+                    root_cause=original_issue.get("root_cause"),
+                    reproduction_steps=original_issue.get("reproduction_steps"),
+                    analysis_tier=original_issue.get("analysis_tier"),
                 )
             )
 
@@ -446,25 +482,164 @@ def analyze_recording(org_id: int, recording_id: int) -> None:
         db.close()
 
 
-def process_intervals_findings(
-    analyzed_intervals: List[RecordingInterval], timestamp_intervals
-) -> List:
-    all_findings = []
-    for analyzed_interval, timestamp_interval in zip(
-        analyzed_intervals, timestamp_intervals
-    ):
-        if analyzed_interval.category == "NORMAL":
-            continue
-        for finding in timestamp_interval.findings:
-            all_findings.append(
+def _build_recording_intervals_from_session_result(
+    recording_id: int, result: SessionAnalysisResult
+) -> List[RecordingInterval]:
+    """
+    Convert a SessionAnalysisResult (rrweb or video-based) into RecordingInterval rows.
+
+    - Each SessionAnalysisResult interval becomes one RecordingInterval.
+    - key_events (timestamp + description, MM:SS) are stored as key_events.
+    - description: built from key_events and optionally issues.
+    """
+    analyzed_intervals: List[RecordingInterval] = []
+
+    def _normalize_mmss_to_hhmmss(ts: str) -> str:
+        """Convert MM:SS to HH:MM:SS for DB; return as-is if not parseable."""
+        try:
+            t = datetime.strptime(ts.strip(), "%M:%S").time()
+            return t.strftime("%H:%M:%S")
+        except ValueError:
+            return ts
+
+    def _mmss_to_time(ts: str) -> time:
+        start_minutes, start_seconds = ts.split(":")
+        start_minutes = int(start_minutes)
+        start_seconds = int(start_seconds)
+        # Convert to HH:MM:SS (supporting > 60 minutes)
+        hours, minutes = divmod(start_minutes, 60)
+        return time(hour=hours, minute=minutes, second=start_seconds)
+
+    for interval_data in result.intervals:
+        try:
+            start_time_obj = _mmss_to_time(interval_data.start_time)
+        except ValueError:
+            logger.warning(
+                "Could not parse start_time for recording. Defaulting to 00:00:00.",
+                start_time=interval_data.start_time,
+                recording_id=recording_id,
+            )
+            start_time_obj = time(0, 0, 0)
+
+        try:
+            end_time_obj = _mmss_to_time(interval_data.end_time)
+        except ValueError:
+            logger.warning(
+                "Could not parse end_time for recording. Defaulting to 00:00:00.",
+                end_time=interval_data.end_time,
+                recording_id=recording_id,
+            )
+            end_time_obj = time(0, 0, 0)
+
+        issues = getattr(interval_data, "issues", []) or []
+        if issues:
+            first_issue = issues[0]
+            category = getattr(first_issue, "category", "BUG") or "BUG"
+            issue_text = ""
+        else:
+            category = "NORMAL"
+            issue_text = None
+
+        key_events = getattr(interval_data, "key_events", []) or []
+
+        # timestamp_descriptions = key_events (each with timestamp MM:SS and description)
+        ts_descriptions_json: List[dict] = []
+        for ke in key_events:
+            ts = getattr(ke, "timestamp", None) or (
+                ke.get("timestamp") if isinstance(ke, dict) else None
+            )
+            desc = getattr(ke, "description", None) or (
+                ke.get("description") if isinstance(ke, dict) else ""
+            )
+            if not ts and not desc:
+                continue
+            ts_descriptions_json.append(
                 {
-                    "recording_interval_id": analyzed_interval.id,
-                    "description": finding.description,
-                    "category": finding.category,
+                    "timestamp": _normalize_mmss_to_hhmmss(ts) if ts else "00:00:00",
+                    "description": desc or "",
                 }
             )
 
-    return all_findings
+        analyzed_intervals.append(
+            RecordingInterval(
+                recording_id=recording_id,
+                start_time=start_time_obj,
+                end_time=end_time_obj,
+                category=category,
+                issue=issue_text,
+                short_title=interval_data.short_title,
+                timestamp_descriptions=ts_descriptions_json,
+                description="",
+            )
+        )
+
+    return analyzed_intervals
+
+
+def process_issues_from_session_result(
+    db: Session,
+    org_id: int,
+    recording_id: int,
+    analyzed_intervals: List[RecordingInterval],
+    result: SessionAnalysisResult,
+    analysis_tier: str = "video",
+) -> None:
+    """
+    Derive Issue rows and recording tags from a SessionAnalysisResult + saved intervals.
+
+    Mapping flow:
+    1. SessionAnalysisResult.Issue → findings payload with all fields
+    2. IssuesSummarizerGraph generates canonical issue fields (title/description/recommendation)
+    3. Canonical Issue table stores:
+       - description: LLM-generated user-friendly summary
+       - root_cause: analyzer's technical diagnosis
+       - recommendation: LLM-generated fix steps
+       - type/target/confidence: analyzer metadata
+    4. IssueRecording table stores session-specific snapshot:
+       - All analyzer fields (type/target/confidence/timestamp/frequency/severity/category)
+       - root_cause/reproduction_steps from analyzer
+       - analysis_tier for tracking which analyzer tier produced this
+    """
+    issue_repository = IssueRepository(db)
+
+    # Build issues payload with all fields from SessionAnalysisResult.Issue
+    issues_payload = []
+    # Map interval.start_time / end_time to SessionAnalysisResult intervals by index
+    for analyzed_interval, src_interval in zip(analyzed_intervals, result.intervals):
+        for iss in src_interval.issues:
+            issues_payload.append(
+                {
+                    "recording_interval_id": analyzed_interval.id,
+                    # Canonical issue fields (for Issue table via IssuesSummarizerGraph)
+                    "description": iss.root_cause,
+                    "category": iss.category,
+                    # Session metadata (for IssueRecording table)
+                    "type": iss.type,
+                    "target": getattr(iss, "target", None),
+                    "confidence": getattr(iss, "confidence", None),
+                    "timestamp": iss.timestamp,
+                    "frequency": iss.frequency,
+                    "severity": iss.severity,
+                    "root_cause": iss.root_cause,
+                    "reproduction_steps": iss.reproduction_steps,
+                    "analysis_tier": analysis_tier,
+                }
+            )
+
+    if not issues_payload:
+        logger.info("No issues to persist for recording", recording_id=recording_id)
+        return
+
+    process_issues(db, org_id, recording_id, issues_payload)
+    issues = issue_repository.get_issues_by_recording(org_id, recording_id)
+    categories = [issue.category for issue in issues]
+    tags = process_tags(categories)
+
+    recording_repo = RecordingRepository(db)
+    recording = recording_repo.get_by_id(recording_id, org_id)
+    if recording:
+        recording.tags = tags
+        recording_repo.update(recording)
 
 
 @post_analysis_process()
@@ -729,70 +904,24 @@ def analyze_local_recording_video(
             # Process the intervals
             logger.info(f"Processing analysis with {len(all_intervals)} intervals")
 
+            # Build a synthetic SessionAnalysisResult from all chunk intervals.
+            # We only need intervals here; top-level scores will be filled by the
+            # recording summarizer.
+            session_result = SessionAnalysisResult(
+                intervals=all_intervals,
+                summary="",
+                title="",
+                health_score=0,
+                confidence_score=0,
+                user_actions=[],
+            )
+
             # Convert the analysis to SQLAlchemy models
-            analyzed_intervals: List[RecordingInterval] = []
-
-            for interval_data in all_intervals:
-                # Convert TimestampDescription models to JSON
-                processed_timestamp_descriptions_json = []
-                for ts_desc in interval_data.timestamp_descriptions:
-                    try:
-                        # Parse MM:SS string to time object
-                        time_obj = datetime.strptime(ts_desc.timestamp, "%M:%S").time()
-                        # Format time object to HH:MM:SS string
-                        hhmmss_str = time_obj.strftime("%H:%M:%S")
-                        # Dump original object and update the timestamp
-                        ts_dict = ts_desc.model_dump()
-                        ts_dict["timestamp"] = hhmmss_str
-                        processed_timestamp_descriptions_json.append(ts_dict)
-                    except ValueError:
-                        logger.warning(
-                            f"Could not parse timestamp '{ts_desc.timestamp}' for recording {recording_id}. Storing original."
-                        )
-                        processed_timestamp_descriptions_json.append(
-                            ts_desc.model_dump()
-                        )
-
-                # Convert MM:SS string to datetime.time object
-                try:
-                    start_time_obj = datetime.strptime(
-                        interval_data.start_time, "%M:%S"
-                    ).time()
-                except ValueError:
-                    logger.warning(
-                        f"Could not parse start_time '{interval_data.start_time}' for recording {recording_id}. Defaulting to 00:00:00."
-                    )
-                    start_time_obj = time(0, 0, 0)
-                try:
-                    end_time_obj = datetime.strptime(
-                        interval_data.end_time, "%M:%S"
-                    ).time()
-                except ValueError:
-                    logger.warning(
-                        f"Could not parse end_time '{interval_data.end_time}' for recording {recording_id}. Defaulting to 00:00:00."
-                    )
-                    end_time_obj = time(0, 0, 0)
-
-                findings = interval_data.findings
-                if findings and len(findings) > 0:
-                    category = findings[0].category if len(findings) > 0 else "BUG"
-                    issue = ""
-                else:
-                    category = "NORMAL"
-                    issue = None
-
-                analyzed_intervals.append(
-                    RecordingInterval(
-                        recording_id=recording_id,
-                        start_time=start_time_obj,
-                        end_time=end_time_obj,
-                        category=category,
-                        issue=issue,
-                        short_title=interval_data.short_title,
-                        timestamp_descriptions=processed_timestamp_descriptions_json,
-                        description=interval_data.description,
-                    )
+            analyzed_intervals: List[RecordingInterval] = (
+                _build_recording_intervals_from_session_result(
+                    recording_id, session_result
                 )
+            )
 
             # Persist intervals
             recording.analysis_progress = 90
@@ -818,17 +947,17 @@ def analyze_local_recording_video(
                     )
                 )
 
-            # Process issues
+            # Process issues using unified SessionAnalysisResult mapping
             if recording_has_issues(analyzed_intervals):
                 logger.info(f"Processing issues for recording {recording_id}")
-                all_findings = process_intervals_findings(
-                    analyzed_intervals, all_intervals
+                process_issues_from_session_result(
+                    db,
+                    org_id,
+                    recording_id,
+                    analyzed_intervals,
+                    session_result,
+                    analysis_tier="video",
                 )
-                process_issues(db, org_id, recording_id, all_findings)
-                issues = issue_repository.get_issues_by_recording(org_id, recording_id)
-                categories = [issue.category for issue in issues]
-                recording.tags = process_tags(categories)
-                logger.info(f"Issues processed for recording {recording_id}")
             else:
                 logger.info(f"No issues found for recording {recording_id}")
 
@@ -968,7 +1097,9 @@ def analyze_video_chunk(
     )
 
     # Process and adjust timestamps
-    chunk_recording_analysis = chunk_analysis.get("recording_analysis")
+    chunk_recording_analysis: SessionAnalysisResult | None = chunk_analysis.get(
+        "recording_analysis"
+    )
     intervals = []
 
     if chunk_recording_analysis:
@@ -1005,10 +1136,9 @@ def analyze_video_chunk(
             interval.end_time = seconds_to_time(original_end_seconds)
 
             # Adjust timestamps in descriptions
-            timestamp_count = len(interval.timestamp_descriptions)
-            for j, desc in enumerate(interval.timestamp_descriptions):
+            for j, key_event in enumerate(interval.key_events):
                 # Get slowed timestamp
-                slowed_ts_seconds = time_to_seconds(desc.timestamp)
+                slowed_ts_seconds = time_to_seconds(key_event.timestamp)
 
                 # Convert to absolute slowed time
                 absolute_slowed_ts = slowed_ts_seconds + start_seconds
@@ -1017,37 +1147,34 @@ def analyze_video_chunk(
                 original_ts_seconds = absolute_slowed_ts / slowdown_factor
 
                 # Update the timestamp
-                desc.timestamp = seconds_to_time(original_ts_seconds)
+                key_event.timestamp = seconds_to_time(original_ts_seconds)
 
         intervals = chunk_recording_analysis.intervals
 
         # Process each interval to consolidate timestamp descriptions
         for interval in intervals:
             try:
-                if (
-                    hasattr(interval, "timestamp_descriptions")
-                    and interval.timestamp_descriptions
-                ):
+                if hasattr(interval, "key_events") and interval.key_events:
                     # Extract the timestamp descriptions list
-                    ts_descriptions = interval.timestamp_descriptions
+                    key_events = interval.key_events
 
                     # Skip if empty
-                    if not ts_descriptions:
+                    if not key_events:
                         continue
 
                     # Check if they're already dictionaries or need conversion
-                    ts_dict_list = []
+                    ke_dict_list = []
                     original_type = None
 
                     try:
-                        if hasattr(ts_descriptions[0], "model_dump"):
+                        if hasattr(key_events[0], "model_dump"):
                             # Save the original type for later conversion back
-                            original_type = type(ts_descriptions[0])
+                            original_type = type(key_events[0])
                             # Convert Pydantic models to dictionaries
-                            ts_dict_list = [ts.model_dump() for ts in ts_descriptions]
+                            ke_dict_list = [ts.model_dump() for ts in key_events]
                         else:
                             # Already dictionaries
-                            ts_dict_list = ts_descriptions
+                            ke_dict_list = key_events
                     except (IndexError, AttributeError):
                         # Handle case where ts_descriptions is empty or doesn't have expected methods
                         logger.warning(
@@ -1056,16 +1183,12 @@ def analyze_video_chunk(
                         continue
 
                     # Skip if no valid descriptions after conversion
-                    if not ts_dict_list:
+                    if not ke_dict_list:
                         continue
 
                     # Consolidate timestamp descriptions
-                    logger.info(
-                        f"Consolidating {len(ts_dict_list)} timestamp descriptions..."
-                    )
-                    consolidated_descriptions = consolidate_timestamp_descriptions(
-                        ts_dict_list
-                    )
+                    logger.info(f"Consolidating {len(ke_dict_list)} key events...")
+                    consolidated_descriptions = consolidate_key_events(ke_dict_list)
                     logger.info(
                         f"Consolidated to {len(consolidated_descriptions)} unique timestamps"
                     )
@@ -1080,25 +1203,23 @@ def analyze_video_chunk(
                                     original_type.model_validate(desc)
                                     for desc in consolidated_descriptions
                                 ]
-                                interval.timestamp_descriptions = converted_descriptions
+                                interval.key_events = converted_descriptions
                             except Exception as e:
                                 logger.error(
                                     f"Error converting back to Pydantic model: {str(e)}"
                                 )
                                 # Fall back to using dictionaries
-                                interval.timestamp_descriptions = (
-                                    consolidated_descriptions
-                                )
+                                interval.key_events = consolidated_descriptions
                         else:
                             # Use dictionaries directly
-                            interval.timestamp_descriptions = consolidated_descriptions
+                            interval.key_events = consolidated_descriptions
             except Exception as e:
                 # Log error but continue processing other intervals
-                logger.error(f"Error processing timestamp descriptions: {str(e)}")
+                logger.error(f"Error processing key events: {str(e)}")
                 continue
 
         logger.info(
-            f"Successfully adjusted timestamps for {interval_count} intervals from chunk {chunk_id}"
+            f"Successfully adjusted key events for {interval_count} intervals from chunk {chunk_id}"
         )
     else:
         logger.warning(f"No intervals found in chunk {chunk_id}")
@@ -1111,28 +1232,25 @@ def analyze_video_chunk(
     return intervals, original_start_seconds, original_duration
 
 
-def consolidate_timestamp_descriptions(
-    timestamp_descriptions: list, time_threshold_seconds: int = 1
-) -> list:
+def consolidate_key_events(key_events: list) -> list:
     """
-    Process timestamp descriptions to merge duplicate entries and similar descriptions
+    Process key events to merge duplicate entries and similar descriptions
     that appear at the same timestamp.
 
     Args:
-        timestamp_descriptions: List of timestamp description objects
-        time_threshold_seconds: Not used anymore - kept for backwards compatibility
+        key_events: List of key event objects
 
     Returns:
-        List of processed timestamp descriptions with duplicates consolidated
+        List of processed key events with duplicates consolidated
     """
-    if not timestamp_descriptions:
+    if not key_events:
         return []
 
     try:
         # Step 1: Standardize the input format and extract timestamps + descriptions
         standardized_descriptions = []
 
-        for item in timestamp_descriptions:
+        for item in key_events:
             # Skip invalid entries
             if not isinstance(item, dict):
                 continue
@@ -1148,7 +1266,7 @@ def consolidate_timestamp_descriptions(
             )
 
         if not standardized_descriptions:
-            return timestamp_descriptions  # Return original if no valid items
+            return key_events  # Return original if no valid items
 
         # Step 2: Group by timestamp (exact match)
         timestamp_groups = {}
@@ -1189,8 +1307,5 @@ def consolidate_timestamp_descriptions(
         return consolidated
 
     except Exception as e:
-        import traceback
-
-        print(f"Error consolidating timestamp descriptions: {e}")
-        print(traceback.format_exc())
-        return timestamp_descriptions  # Return original data on error
+        logger.error("Error consolidating timestamp descriptions", exc_info=e)
+        return key_events  # Return original data on error
