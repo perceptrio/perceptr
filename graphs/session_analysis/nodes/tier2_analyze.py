@@ -20,7 +20,10 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langfuse.decorators import langfuse_context, observe
 
-from common.prompts.session_analysis import format_issues_for_prompt, format_tier2_prompt
+from common.prompts.session_analysis import (
+    format_issues_for_prompt,
+    format_tier2_prompt,
+)
 from common.schemas.session_analysis import (
     Issue,
     SessionAnalysisResult,
@@ -84,7 +87,7 @@ def tier2_analyze_node(state: SessionAnalysisState) -> dict:
     compressed = state["compressed_events"]
     patterns = state.get("patterns", [])
     prog_result = state["prog_result"]
-    model = state.get("model", "gemini-2.5-flash-preview-09-2025")
+    model = state.get("model", "gemini-2.5-flash")
     keyframe_base64 = state.get("keyframe_base64", [])
 
     duration = _session_duration(events)

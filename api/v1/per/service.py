@@ -88,6 +88,7 @@ def _process_session_background(
     org_id: int,
     session_id: str,
     force: bool = False,
+    force_tier: str = None,
 ) -> None:
     """Background task to process a session - creates its own DB session"""
     db = SessionLocal()
@@ -204,7 +205,7 @@ def _process_session_background(
 
             logger.info("Running rrweb SessionAnalyzer graph", session_id=session_id)
             analyzer = SessionAnalyzer()
-            analysis_state = analyzer.analyze(raw_session)
+            analysis_state = analyzer.analyze(raw_session, force_tier=force_tier)
             result: SessionAnalysisResult = analysis_state["result"]
             analysis_tier = analysis_state.get("tier", "tier0")
 
@@ -306,11 +307,12 @@ def process_session(
     session_id: str,
     background_tasks: BackgroundTasks,
     force: bool = False,
+    force_tier: str = None,
 ) -> dict:
     """Process a session"""
     try:
         background_tasks.add_task(
-            _process_session_background, org_id, session_id, force
+            _process_session_background, org_id, session_id, force, force_tier
         )
 
         return {"success": True, "message": "Session scheduled for processing"}
@@ -419,6 +421,7 @@ async def check_and_process_stale_recording_async(org_id: int, session_id: str) 
                 org_id,
                 session_id,
                 False,
+                None,
             )
             return True  # we processed, no reschedule
         else:

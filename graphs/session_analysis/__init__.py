@@ -121,7 +121,7 @@ class SessionAnalyzer:
         raw_session: dict,
         *,
         force_tier: Optional[str] = None,
-        model: str = "gemini-2.5-flash-preview-09-2025",
+        model: str = "gemini-2.5-flash",
         max_frames: int = 8,
     ) -> dict:
         """Run the full session analysis graph.

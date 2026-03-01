@@ -39,7 +39,7 @@ class VideoRecordingAnalyzerGraph:
 
         self.gemini_llm = ChatGoogleGenerativeAI(
             api_key=settings.GEMINI_API_KEY,
-            model="gemini-2.5-flash-preview-09-2025",
+            model="gemini-2.5-flash",
             # model="gemini-3-flash-preview",
             # model="gemini-3-pro-preview",
             temperature=0,

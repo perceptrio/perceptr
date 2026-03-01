@@ -57,7 +57,7 @@ def tier1_analyze_node(state: SessionAnalysisState) -> dict:
     compressed = state["compressed_events"]
     patterns = state.get("patterns", [])
     prog_result = state["prog_result"]
-    model = state.get("model", "gemini-2.5-flash-preview-09-2025")
+    model = state.get("model", "gemini-2.5-flash")
 
     duration = _session_duration(events)
     issues = _get_all_issues(prog_result)
