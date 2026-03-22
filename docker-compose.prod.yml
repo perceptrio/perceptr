@@ -48,8 +48,6 @@ services:
       - "8000"
 
   caddy:
-    # For nemoclaw to be able to reach localhost
-    network_mode: host
     image: caddy:2-alpine
     container_name: perceptr-caddy
     restart: unless-stopped
@@ -64,8 +62,6 @@ services:
       - caddy_data:/data
       - caddy_config:/config
       - caddy_logs:/var/log/caddy
-    networks:
-      - perceptr-network
     depends_on:
       - api
 
