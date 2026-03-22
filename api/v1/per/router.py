@@ -52,7 +52,9 @@ async def process_session_api(
     if org is None:
         raise HTTPException(status_code=400, detail="Invalid project id")
     try:
-        service.process_session(org.id, session_id, background_tasks, force)
+        service.process_session(
+            org.id, session_id, background_tasks, force, force_tier="tier2"
+        )
         return GenericResponse(success=True, message="Session triggered successfully")
     except Exception as e:
         logger.error(f"Failed to process session", exc_info=e)
