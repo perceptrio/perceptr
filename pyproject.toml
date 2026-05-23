@@ -1,11 +1,12 @@
 [project]
 name = "perceptr"
 version = "0.1.0"
-description = ""
+description = "Backend API for Perceptr session recording and AI-powered UX analysis"
 authors = [
-    {name = "abdelrahman",email = "asoliman@perceptr.io"}
+    {name = "abdelrahman", email = "asoliman@perceptr.io"}
 ]
 readme = "README.md"
+license = {text = "MIT"}
 requires-python = ">=3.11,<=3.13.5"
 dependencies = [
     "fastapi>=0.115.6,<0.116.0",

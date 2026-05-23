@@ -44,6 +44,11 @@ class Settings(BaseSettings):
     RECORDING_INTERVAL_DURATION: int = 30  # 30 seconds chunk size
     SLOW_DOWN_FACTOR: float = 1.0  # 1.0 means no slowdown set it to 2.0 for 2x slowdown
 
+    # Brevo notification routing (comma-separated for cc/bcc)
+    BREVO_INTERNAL_TO_EMAIL: str = ""
+    BREVO_INTERNAL_CC_EMAILS: str = ""
+    BREVO_INTERNAL_BCC_EMAILS: str = ""
+
     class Config:
         env_file = ".env"
 

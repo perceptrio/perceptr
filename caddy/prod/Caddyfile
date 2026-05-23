@@ -1,3 +1,4 @@
+# Replace with your production API domain
 api.perceptr.io {
     # Reverse proxy to the FastAPI application
     reverse_proxy api:8000 {

@@ -4,6 +4,7 @@ from core.constants import APIPath
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from settings import settings
+from utils.brevo import add_optional_recipients
 
 router = APIRouter(prefix=f"{APIPath.V1}/email", tags=["email"])
 
@@ -22,6 +23,11 @@ async def send_contact_email(request: EmailRequest):  # type: ignore
         raise HTTPException(
             status_code=500, detail="Email service configuration is missing"
         )
+    if not settings.BREVO_INTERNAL_TO_EMAIL:
+        raise HTTPException(
+            status_code=503,
+            detail="Email routing is not configured (set BREVO_INTERNAL_TO_EMAIL)",
+        )
 
     # Prepare the email parameters
     params = {
@@ -31,13 +37,15 @@ async def send_contact_email(request: EmailRequest):  # type: ignore
         "details": request.details or "Not provided",
     }
 
-    # Prepare the email payload
-    payload = {
-        "templateId": 1,
-        "cc": [{"email": "emadmohamed95@gmail.com"}],
-        "to": [{"email": "bebofit@aucegypt.edu"}],
-        "params": params,
-    }
+    payload = add_optional_recipients(
+        {
+            "templateId": 1,
+            "to": [{"email": settings.BREVO_INTERNAL_TO_EMAIL}],
+            "params": params,
+        },
+        cc=settings.BREVO_INTERNAL_CC_EMAILS,
+        bcc=settings.BREVO_INTERNAL_BCC_EMAILS,
+    )
 
     async with httpx.AsyncClient() as client:
         try:

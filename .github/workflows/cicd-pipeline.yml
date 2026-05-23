@@ -1,12 +1,10 @@
 name: CI/CD Pipeline
 
+# Legacy AWS ECS pipeline — disabled. Production deploys via deploy-hostinger.yml.
 on:
   push:
-    branches:
-      # TODO: Uncomment these branches when they are ready
-      # - dev
-      # - main
-      - stg
+    branches: []
+  workflow_dispatch:
 
 env:
   AWS_REGION: "us-east-1"

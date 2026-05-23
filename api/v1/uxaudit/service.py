@@ -12,6 +12,7 @@ from common.services.s3 import s3_service
 from fastapi import HTTPException
 from graphs.ux_audit_graph import Issue, UXAudit, UXAuditGraph
 from settings import settings
+from utils.brevo import add_optional_recipients, internal_notification_emails
 from utils.recording import extract_frames_from_video
 from utils.structured_ux_pdf_generator import StructuredUXAuditPDFGenerator
 
@@ -57,6 +58,11 @@ async def send_lead_ai_engineer_email(request: LeadAIEngineerRequest):
         raise HTTPException(
             status_code=500, detail="Email service configuration is missing"
         )
+    if not settings.BREVO_INTERNAL_TO_EMAIL:
+        raise HTTPException(
+            status_code=503,
+            detail="Email routing is not configured (set BREVO_INTERNAL_TO_EMAIL)",
+        )
     # Prepare the email parameters
     params = {
         "email": request.email,
@@ -65,20 +71,26 @@ async def send_lead_ai_engineer_email(request: LeadAIEngineerRequest):
         "useCases": json.dumps(request.useCases),
         "utm": request.utm,
     }
-    payload = {
-        "templateId": 4,
-        "cc": [{"email": "emadmohamed95@gmail.com"}],
-        "to": [{"email": "bebofit@aucegypt.edu"}],
-        "params": params,
-    }
-    lead_payload = {
-        "templateId": 5,
-        "bcc": [
-            {"email": "emadmohamed95@gmail.com"},
-            {"email": "bebofit@aucegypt.edu"},
-        ],
-        "to": [{"email": request.email}],
-    }
+    payload = add_optional_recipients(
+        {
+            "templateId": 4,
+            "to": [{"email": settings.BREVO_INTERNAL_TO_EMAIL}],
+            "params": params,
+        },
+        cc=settings.BREVO_INTERNAL_CC_EMAILS,
+        bcc=settings.BREVO_INTERNAL_BCC_EMAILS,
+    )
+    lead_payload = add_optional_recipients(
+        {
+            "templateId": 5,
+            "to": [{"email": request.email}],
+        },
+        bcc=internal_notification_emails(
+            settings.BREVO_INTERNAL_BCC_EMAILS,
+            settings.BREVO_INTERNAL_TO_EMAIL,
+            settings.BREVO_INTERNAL_CC_EMAILS,
+        ),
+    )
     save_contact_payload = {
         "email": request.email,
         "updateEnabled": True,
@@ -136,13 +148,21 @@ async def send_lead_ux_audit_email(email: str):
             status_code=500, detail="Email service configuration is missing"
         )
     # Prepare the email parameters
+    if not settings.BREVO_INTERNAL_TO_EMAIL:
+        raise HTTPException(
+            status_code=503,
+            detail="Email routing is not configured (set BREVO_INTERNAL_TO_EMAIL)",
+        )
     params = {"email": email}
-    payload = {
-        "templateId": 2,
-        "cc": [{"email": "emadmohamed95@gmail.com"}],
-        "to": [{"email": "bebofit@aucegypt.edu"}],
-        "params": params,
-    }
+    payload = add_optional_recipients(
+        {
+            "templateId": 2,
+            "to": [{"email": settings.BREVO_INTERNAL_TO_EMAIL}],
+            "params": params,
+        },
+        cc=settings.BREVO_INTERNAL_CC_EMAILS,
+        bcc=settings.BREVO_INTERNAL_BCC_EMAILS,
+    )
     # Prepare the email payload
 
     async with httpx.AsyncClient() as client:
@@ -180,13 +200,17 @@ async def send_ux_audit_result_email(user_email: str, pdf_url: str):
         # Prepare the email parameters
         params = {"email": user_email, "pdfLink": pdf_url}
 
-        # Prepare the email payload
-        payload = {
-            "templateId": 3,
-            "bcc": [{"email": "emadmohamed95@gmail.com"}],
-            "to": [{"email": user_email}],
-            "params": params,
-        }
+        payload = add_optional_recipients(
+            {
+                "templateId": 3,
+                "to": [{"email": user_email}],
+                "params": params,
+            },
+            bcc=internal_notification_emails(
+                settings.BREVO_INTERNAL_BCC_EMAILS,
+                settings.BREVO_INTERNAL_TO_EMAIL,
+            ),
+        )
 
         async with httpx.AsyncClient() as client:
             try:
